@@ -272,7 +272,7 @@ class MainActivity : Activity() {
         setHintTextColor(Color.rgb(111, 128, 150))
         setTextColor(Color.WHITE)
         textSize = 14f
-        singleLine = true
+        setSingleLine(true)
         setPadding(dp(13), dp(12), dp(13), dp(12))
         setBackgroundColor(Color.rgb(25, 33, 46))
     }
