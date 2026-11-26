@@ -233,8 +233,15 @@ public sealed class SkySpyApiHost : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        await _app.StopAsync(TimeSpan.FromSeconds(3));
-        await _app.DisposeAsync();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+        try
+        {
+            await _app.StopAsync(timeout.Token);
+        }
+        finally
+        {
+            await _app.DisposeAsync();
+        }
     }
 }
 
