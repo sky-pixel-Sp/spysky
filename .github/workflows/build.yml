@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   verify-api:
-    name: Verify API and pairing flow
+    name: Verify API and owner-approved enrollment
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -24,7 +24,7 @@ jobs:
       - name: Check API syntax
         working-directory: services/api
         run: npm run check
-      - name: Run pairing and heartbeat smoke tests
+      - name: Run auth, no-code registration, heartbeat and unpair tests
         working-directory: services/api
         run: npm test
 
