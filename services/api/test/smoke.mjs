@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { networkInterfaces, tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID, randomInt } from "node:crypto";
@@ -46,6 +46,21 @@ async function request(route, options = {}) {
   return { status: response.status, body: await response.json() };
 }
 
+async function requestFromLan(route, options = {}) {
+  const lanAddress = Object.values(networkInterfaces())
+    .flat()
+    .find((entry) => entry && entry.family === "IPv4" && !entry.internal && !entry.address.startsWith("169.254."))?.address;
+  assert.ok(lanAddress, "CI runner needs a non-loopback IPv4 interface for the LAN access test.");
+  const response = await fetch("http://" + lanAddress + ":" + port + route, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...(options.headers ?? {})
+    }
+  });
+  return { status: response.status, body: await response.json() };
+}
+
 try {
   await waitForServer();
 
@@ -62,9 +77,7 @@ try {
   assert.equal(initialStatus.body.configured, false);
   assert.equal(initialStatus.body.localAccess, true);
 
-  const remoteStatus = await request("/api/auth/status", {
-    headers: { Host: "192.168.1.50" }
-  });
+  const remoteStatus = await requestFromLan("/api/auth/status");
   assert.equal(remoteStatus.status, 200);
   assert.equal(remoteStatus.body.localAccess, false);
 
@@ -98,9 +111,7 @@ try {
   assert.equal(localInventory.status, 200);
   assert.deepEqual(localInventory.body.devices, []);
 
-  const remoteInventoryWithoutLogin = await request("/api/devices", {
-    headers: { Host: "192.168.1.50" }
-  });
+  const remoteInventoryWithoutLogin = await requestFromLan("/api/devices");
   assert.equal(remoteInventoryWithoutLogin.status, 401);
 
   const installId = randomUUID();
@@ -133,8 +144,8 @@ try {
   assert.equal(localInventoryAfterRegistration.body.devices.length, 1);
   assert.equal(localInventoryAfterRegistration.body.devices[0].model, diagnostics.model);
 
-  const inventory = await request("/api/devices", {
-    headers: { Host: "192.168.1.50", Authorization: "Bearer " + login.body.token }
+  const inventory = await requestFromLan("/api/devices", {
+    headers: { Authorization: "Bearer " + login.body.token }
   });
   assert.equal(inventory.status, 200);
   assert.equal(inventory.body.devices.length, 1);
@@ -165,21 +176,21 @@ try {
   });
   assert.equal(unpair.status, 200);
 
-  const emptyInventory = await request("/api/devices", {
-    headers: { Host: "192.168.1.50", Authorization: "Bearer " + login.body.token }
+  const emptyInventory = await requestFromLan("/api/devices", {
+    headers: { Authorization: "Bearer " + login.body.token }
   });
   assert.equal(emptyInventory.status, 200);
   assert.equal(emptyInventory.body.devices.length, 0);
 
-  const logout = await request("/api/auth/logout", {
+  const logout = await requestFromLan("/api/auth/logout", {
     method: "POST",
-    headers: { Host: "192.168.1.50", Authorization: "Bearer " + login.body.token },
+    headers: { Authorization: "Bearer " + login.body.token },
     body: "{}"
   });
   assert.equal(logout.status, 200);
 
-  const afterLogout = await request("/api/devices", {
-    headers: { Host: "192.168.1.50", Authorization: "Bearer " + login.body.token }
+  const afterLogout = await requestFromLan("/api/devices", {
+    headers: { Authorization: "Bearer " + login.body.token }
   });
   assert.equal(afterLogout.status, 401);
 
