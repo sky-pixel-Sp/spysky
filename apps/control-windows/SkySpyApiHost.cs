@@ -25,13 +25,13 @@ public sealed class SkySpyApiHost : IAsyncDisposable
         Store = store;
     }
 
-    public static async Task<SkySpyApiHost> StartAsync()
+    public static async Task<SkySpyApiHost> StartAsync(string? dataFilePath = null, int port = 8787)
     {
         string dataDirectory = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "SkySpy",
             "data");
-        var store = new DeviceStore(Path.Combine(dataDirectory, "devices.json"));
+        var store = new DeviceStore(dataFilePath ?? Path.Combine(dataDirectory, "devices.json"));
         await store.InitializeAsync();
 
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions
@@ -45,10 +45,10 @@ public sealed class SkySpyApiHost : IAsyncDisposable
         builder.WebHost.ConfigureKestrel(options =>
         {
             options.Limits.MaxRequestBodySize = 16 * 1024;
-            options.ListenLocalhost(8787);
+            options.ListenLocalhost(port);
             foreach (IPAddress address in privateAddresses)
             {
-                options.Listen(address, 8787);
+                options.Listen(address, port);
             }
         });
         builder.Services.AddSingleton(store);
