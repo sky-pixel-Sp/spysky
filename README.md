@@ -41,22 +41,26 @@ npm start
 
 No environment variables or API token need to be entered.
 
+The API package includes the compiled Control PWA in `services/api/public` and serves it from the same port. Start the service, then open `http://localhost:8787` on the host computer. No separate web server is required.
+
 The API listens on port 8787 on the host's network interfaces. Keep it on a trusted LAN during local use. For internet access, place it behind an HTTPS reverse proxy or deploy it with HTTPS; do not expose the plain HTTP API directly to the public internet.
 
 ## First-time Control setup
 
-1. Start the API on the computer that will host SkySpy.
-2. Start the Control dashboard on that same computer.
-3. Open the Control dashboard and use `http://localhost:8787` as its API address.
-4. Create an admin password of at least 12 characters. Initial admin creation is restricted to a loopback request from the server computer.
-5. Sign in with that password.
+1. Start the API + Control package on the computer that will host SkySpy.
+2. Open `http://localhost:8787` on that same computer.
+3. Create an admin password of at least 12 characters. Initial admin creation is restricted to a loopback request from the server computer.
+4. Sign in with that password.
+5. On another computer or phone on the same LAN, open `http://<server-lan-ip>:8787` and sign in with the admin password.
+
+The Control UI uses the current server origin automatically, so LAN clients do not need to edit an API URL. The admin password is salted and hashed by the API. Control receives a short-lived session token after login; the operator does not need to manage or paste an API token. Sessions last up to 12 hours and are cleared when the API restarts.
 
 The admin password is salted and hashed by the API. Control receives a short-lived session token after login; the operator does not need to manage or paste an API token. Sessions last up to 12 hours and are cleared when the API restarts.
 
 ## Connect a Companion device — no pairing code
 
 1. Open SkySpy Companion on the phone.
-2. Enter the SkySpy API server address once. For LAN, use the private IPv4 address of the computer running the API, for example `http://192.168.1.10:8787`.
+2. Enter the SkySpy server address once. For LAN, use the private IPv4 address of the computer running SkySpy, for example `http://192.168.1.10:8787`.
 3. Read the diagnostics list and tick the explicit consent checkbox.
 4. Tap **Connect this device**.
 5. The registered device appears automatically in Control. The dashboard refreshes its list every six seconds.
@@ -95,7 +99,7 @@ The workflow builds and tests:
 - SkySpy Companion debug APK
 - API service archive
 
-A successful run uploads separate artifacts named `skyspy-control-web`, `skyspy-companion-debug-apk`, and `skyspy-api-service`.
+A successful run uploads separate artifacts named `skyspy-control-web`, `skyspy-companion-debug-apk`, and `skyspy-api-service`. The API service artifact includes the compiled Control PWA, so it can host the dashboard itself.
 
 ## Current scope
 
