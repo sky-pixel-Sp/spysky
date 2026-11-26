@@ -79,7 +79,7 @@ If Companion is installed on a different network, use an HTTPS API address. Plai
 
 The first connection is owner-approved and requires the SkySpy server address once. Companion then saves the server address, installation ID, device ID, and device-specific credential in its private app storage. On later launches, it starts the visible `AutoConnectService` automatically and reuses that device identity; no repeated pairing code or Companion-side operator login is needed. A persistent Android notification identifies the running connection service. The owner can remove the enrollment from inside Companion.
 
-The API still validates the per-device credential on heartbeat requests, and SkySpy Control retains its operator sign-in. This prevents an unauthenticated client from impersonating an enrolled phone or reading the device inventory.
+The API still validates the per-device credential on heartbeat requests. SkySpy Control requires an operator session when opened from another computer or phone on the LAN; only the server computer's loopback session uses Personal Local Mode without a password. This prevents an unauthenticated network client from reading the device inventory.
 
 Android controls background execution. The service is started while Companion is visible and remains active after the activity is closed when Android permits it. Force-stop, uninstall, vendor battery managers, or system restrictions can interrupt it; opening Companion starts reconnection again. This is not a stealth service and it does not start itself invisibly at boot.
 
