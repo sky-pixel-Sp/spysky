@@ -109,6 +109,22 @@ try {
   });
   assert.equal(heartbeat.status, 200);
 
+  const reusedCode = await request("/api/pairing/claim", {
+    method: "POST",
+    body: JSON.stringify({
+      code: pairing.body.code,
+      device: { model: "Second handset" }
+    })
+  });
+  assert.equal(reusedCode.status, 400, "pairing codes must be single-use");
+
+  const unpair = await request("/api/device/unpair", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${claim.body.deviceToken}` },
+    body: "{}"
+  });
+  assert.equal(unpair.status, 200);
+
   const wrongToken = await request("/api/device/heartbeat", {
     method: "POST",
     headers: { Authorization: "Bearer invalid-token" },
@@ -116,7 +132,13 @@ try {
   });
   assert.equal(wrongToken.status, 401);
 
-  console.log("PASS: operator authentication, one-time pairing, inventory, token isolation, heartbeat.");
+  const emptyInventory = await request("/api/devices", {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  assert.equal(emptyInventory.status, 200);
+  assert.equal(emptyInventory.body.devices.length, 0, "unpaired device must leave inventory");
+
+  console.log("PASS: operator auth, one-time pairing, inventory, device token isolation, heartbeat, unpair.");
 } finally {
   child.kill("SIGTERM");
   await rm(dataDir, { recursive: true, force: true });
