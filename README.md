@@ -2,60 +2,68 @@
 
 SkySpy LAN is a **consent-based remote device management** project with two separate applications:
 
-1. **SkySpy Control** — an installable web dashboard (PWA-ready) for an operator.
-2. **SkySpy Companion** — an Android app that a device owner installs and explicitly pairs.
+1. **SkySpy Control** — an installable web dashboard (PWA) for the operator.
+2. **SkySpy Companion** — an Android application that the device owner installs and chooses to connect.
 
-A small API service handles pairing, device registration, and heartbeats. The first milestone focuses on transparent device enrollment and inventory. Remote screen sharing and file transfer are later, separately consented features; they are not claimed as implemented in this milestone.
+A small API service handles first-run admin setup, authentication, device registration, and heartbeats. Device registration does not require a pairing code: the owner reviews the diagnostics notice and taps **Connect this device** in Companion.
 
 ## Project layout
 
 ```text
 apps/
-  control/       React + TypeScript dashboard
-  companion/     Kotlin Android companion app
+  control/       React + TypeScript dashboard (PWA)
+  companion/     Kotlin Android Companion
 services/
-  api/           Node.js API for pairing and device status
+  api/           Node.js API and local data store
 .github/
   workflows/     CI builds both applications
 ```
 
-## Consent and safety model
+## No environment-variable setup
 
-- The Companion has a visible app icon and persistent, user-readable status.
-- Pairing is initiated by an operator and completed by entering a short-lived code on the Companion.
-- Device owners can unpair by clearing the app's pairing data or uninstalling the app.
-- The first milestone collects only device model, Android version/security patch, battery level/charging state, and heartbeat time.
-- It does not request SMS, contacts, call logs, accessibility, notification access, microphone, camera, location, or broad storage permissions.
-- No covert recording, credential/OTP collection, keylogging, phishing overlays, stealth persistence, remote shell, or security-control bypass is included.
-- Screen sharing, when implemented, must use Android's visible MediaProjection consent flow and an explicit per-session action.
-- File transfer, when implemented, must use Android's system file picker and explicit owner selection.
+The API uses built-in defaults. You do not need to configure `SKYSPY_ADMIN_TOKEN`, `SKYSPY_DATA_DIR`, `SKYSPY_PORT`, or `SKYSPY_ALLOWED_ORIGIN`.
 
-## Network model
+- API port: `8787`
+- Local data directory: `./data`
+- Device records: `./data/devices.json`
+- Admin password hash: `./data/admin-auth.json`
 
-- LAN mode: the Companion may connect to an API hosted on a private IPv4 address on the same trusted network.
-- Internet mode: use a public HTTPS endpoint. Do not expose the API over public plain HTTP.
-- This milestone uses authenticated HTTPS/HTTP API requests and polling. **WebRTC P2P, STUN, and TURN are not implemented yet.** A later milestone can add consent-gated WebRTC screen sharing with TURN fallback.
-- Never publish operator tokens in frontend source, Git history, screenshots, or issue reports. The operator enters the token in the Control dashboard at runtime.
+The data directory is created automatically when the API starts and saves its first record.
 
-## API configuration
+## Run the API
 
-Run the API with Node.js 26 LTS or another supported modern Node.js LTS release.
-
-Required environment variables:
-
-- `SKYSPY_ADMIN_TOKEN`: a random secret of at least 32 characters.
-- `SKYSPY_DATA_DIR`: optional data directory; defaults to `./data`.
-- `SKYSPY_PORT`: optional port; defaults to `8787`.
-- `SKYSPY_ALLOWED_ORIGIN`: optional browser origin; defaults to `http://localhost:5173`.
-
-Example:
+Install Node.js 22 or newer, then:
 
 ```bash
 cd services/api
-SKYSPY_ADMIN_TOKEN="replace-with-a-long-random-secret" node src/server.mjs
+npm start
 ```
 
-The API listens on port 8787. For LAN use, bind it to a private network and firewall it to trusted clients. For internet access, put it behind a TLS reverse proxy or an HTTPS deployment platform.
+No environment variables or API token need to be entered.
+
+The API listens on port 8787 on the host's network interfaces. Keep it on a trusted LAN during local use. For internet access, place it behind an HTTPS reverse proxy or deploy it with HTTPS; do not expose the plain HTTP API directly to the public internet.
+
+## First-time Control setup
+
+1. Start the API on the computer that will host SkySpy.
+2. Start the Control dashboard on that same computer.
+3. Open the Control dashboard and use `http://localhost:8787` as its API address.
+4. Create an admin password of at least 12 characters. Initial admin creation is restricted to a loopback request from the server computer.
+5. Sign in with that password.
+
+The admin password is salted and hashed by the API. Control receives a short-lived session token after login; the operator does not need to manage or paste an API token. Sessions last up to 12 hours and are cleared when the API restarts.
+
+## Connect a Companion device — no pairing code
+
+1. Open SkySpy Companion on the phone.
+2. Enter the SkySpy API server address once. For LAN, use the private IPv4 address of the computer running the API, for example `http://192.168.1.10:8787`.
+3. Read the diagnostics list and tick the explicit consent checkbox.
+4. Tap **Connect this device**.
+5. The registered device appears automatically in Control. The dashboard refreshes its list every six seconds.
+
+The Companion does not request an operator password, pairing code, or broad Android permissions. It shares only manufacturer/model, Android version/security patch, battery/charging state, app version, and heartbeat time. The heartbeat runs only while the Companion screen is open in this milestone.
+
+If Companion is installed on a different network, use an HTTPS API address. Plain HTTP is intentionally blocked by the app for public addresses.
 
 ## Build locally
 
@@ -81,17 +89,28 @@ The debug APK is generated at `app/build/outputs/apk/debug/app-debug.apk`.
 
 ## GitHub Actions
 
-The workflow in `.github/workflows/build.yml` builds the Control dashboard and Android Companion, checks the API JavaScript syntax, and uploads the outputs as one workflow artifact. A green workflow is the build verification; a repository commit by itself is not proof that an APK compiled.
+The workflow builds and tests:
+- API authentication, consent-gated registration, inventory, token rotation, heartbeat, and unpair
+- SkySpy Control TypeScript production build
+- SkySpy Companion debug APK
+- API service archive
 
-## Status
+A successful run uploads separate artifacts named `skyspy-control-web`, `skyspy-companion-debug-apk`, and `skyspy-api-service`.
 
-- [x] Separate Control and Companion application boundaries
-- [x] Pairing and device inventory API
-- [x] Device heartbeat/status
-- [x] Control dashboard for pairing and selecting a paired device
-- [x] Android Companion pairing UI and minimal diagnostics
-- [ ] WebRTC P2P screen sharing (requires a visible, per-session Android MediaProjection approval)
-- [ ] Consent-based file transfer
-- [ ] Production database, deployment, and end-to-end security review
+## Current scope
 
-See [SECURITY.md](SECURITY.md) before exposing any service to the internet.
+- [x] Separate Control dashboard and Android Companion
+- [x] Default API configuration without environment variables
+- [x] First-run admin password setup and login
+- [x] Owner-approved device registration without pairing codes
+- [x] Device inventory, details, online/offline status, heartbeat, and owner unpair
+- [x] LAN address support; HTTPS required for public internet endpoints
+- [ ] WebRTC P2P screen sharing with per-session Android MediaProjection consent
+- [ ] Consent-based file transfer using Android's system file picker
+- [ ] Production deployment hardening, TLS configuration, and security review
+
+## Consent and safety model
+
+The Companion stays visible, has a launcher icon, and shows what data it shares. The owner can disconnect at any time. This project does not include SMS/OTP access, contacts access, call logs, notification capture, keylogging, credential collection, hidden recording, phishing overlays, silent installation, stealth persistence, remote shell, or Android security-control bypass.
+
+See [SECURITY.md](SECURITY.md).
