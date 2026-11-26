@@ -92,7 +92,7 @@ public sealed class SkySpyApiHost : IAsyncDisposable
     {
         if (!IsPrivateLanClient(context))
         {
-            return Results.Forbid();
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
         }
 
         if (request is null)
@@ -139,7 +139,7 @@ public sealed class SkySpyApiHost : IAsyncDisposable
     {
         if (!IsPrivateLanClient(context))
         {
-            return Results.Forbid();
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
         }
 
         string token = BearerToken(context);
@@ -167,7 +167,7 @@ public sealed class SkySpyApiHost : IAsyncDisposable
     {
         if (!IsPrivateLanClient(context))
         {
-            return Results.Forbid();
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
         }
 
         string token = BearerToken(context);
