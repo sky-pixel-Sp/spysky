@@ -98,7 +98,7 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
         }
         setupSection.addView(text("ONE-TIME CONNECTION SETUP", 10f, Color.rgb(130, 148, 173), true), params(top = 25))
-        serverInput = editText("https://your-control-server.example")
+        serverInput = editText("Enter the server address for first connection")
         serverInput.setText(preferences.getString(KEY_SERVER_URL, ""))
         setupSection.addView(text("SkySpy server address", 12f, Color.rgb(155, 169, 190), false), params(top = 10))
         setupSection.addView(serverInput, params(top = 6))
