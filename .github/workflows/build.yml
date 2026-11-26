@@ -1,4 +1,4 @@
-name: Build SkySpy Applications
+name: Build SkySpy Android APKs
 
 on:
   push:
@@ -11,55 +11,42 @@ permissions:
   contents: read
 
 jobs:
-  build-control-windows:
-    name: Test and build native Windows Control
-    runs-on: windows-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Set up .NET 8
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: 8.0.x
-      - name: Test device store and credential lifecycle
-        run: dotnet test apps/control-windows.Tests/SkySpy.Control.Tests.csproj --configuration Release
-      - name: Publish self-contained Windows x64 application
-        shell: pwsh
-        run: |
-          dotnet publish apps/control-windows/SkySpy.Control.csproj --configuration Release --runtime win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=None -p:DebugSymbols=false --output artifacts/publish
-          New-Item -ItemType Directory -Force -Path artifacts/package | Out-Null
-          Copy-Item artifacts/publish/SkySpy.Control.exe artifacts/package/SkySpy.Control.exe
-          Copy-Item README.md artifacts/package/README.md
-          Copy-Item SECURITY.md artifacts/package/SECURITY.md
-          Compress-Archive -Path artifacts/package/* -DestinationPath artifacts/SkySpy-Control-Windows-x64.zip -Force
-      - name: Upload Windows desktop application
-        uses: actions/upload-artifact@v4
-        with:
-          name: skyspy-control-windows-x64
-          path: artifacts/SkySpy-Control-Windows-x64.zip
-          if-no-files-found: error
-
-  build-companion:
-    name: Build SkySpy Companion APK
+  build-android:
+    name: Build SkySpy Android applications
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
       - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
+
       - name: Set up Gradle 8.14.4
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.14.4"
-      - name: Build debug APK
-        working-directory: apps/companion
+
+      - name: Build Android Controller APK
+        working-directory: apps/controller
         run: gradle --no-daemon assembleDebug
-      - name: Upload Companion APK
+
+      - name: Upload Android Controller APK
         uses: actions/upload-artifact@v4
         with:
-          name: skyspy-companion-debug-apk
+          name: skyspy-controller-android-debug-apk
+          path: apps/controller/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+      - name: Build Android Companion APK
+        working-directory: apps/companion
+        run: gradle --no-daemon assembleDebug
+
+      - name: Upload Android Companion APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: skyspy-companion-android-debug-apk
           path: apps/companion/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
