@@ -1,0 +1,94 @@
+name: Build SkySpy LAN
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-api:
+    name: Verify API and pairing flow
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Node.js 26 LTS
+        uses: actions/setup-node@v4
+        with:
+          node-version: 26
+      - name: Check API syntax
+        working-directory: services/api
+        run: npm run check
+      - name: Run pairing and heartbeat smoke tests
+        working-directory: services/api
+        run: npm test
+
+  build-control:
+    name: Build SkySpy Control
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Node.js 26 LTS
+        uses: actions/setup-node@v4
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: apps/control/package.json
+      - name: Install dependencies
+        working-directory: apps/control
+        run: npm install
+      - name: Type-check and build Control
+        working-directory: apps/control
+        run: npm run build
+      - name: Upload Control web build
+        uses: actions/upload-artifact@v4
+        with:
+          name: skyspy-control-web
+          path: apps/control/dist/
+          if-no-files-found: error
+
+  build-companion:
+    name: Build SkySpy Companion APK
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Set up Gradle 8.13
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.13"
+      - name: Build debug APK
+        working-directory: apps/companion
+        run: gradle --no-daemon assembleDebug
+      - name: Upload Companion APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: skyspy-companion-debug-apk
+          path: apps/companion/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+  package-api:
+    name: Package API service
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Create API package
+        run: tar -czf skyspy-api.tar.gz services/api README.md SECURITY.md
+      - name: Upload API package
+        uses: actions/upload-artifact@v4
+        with:
+          name: skyspy-api-service
+          path: skyspy-api.tar.gz
+          if-no-files-found: error
