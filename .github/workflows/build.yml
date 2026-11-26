@@ -79,12 +79,18 @@ jobs:
           if-no-files-found: error
 
   package-api:
-    name: Package API service
+    name: Package API and Control app
+    needs: build-control
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Create API package
+      - name: Download Control web build
+        uses: actions/download-artifact@v4
+        with:
+          name: skyspy-control-web
+          path: services/api/public
+      - name: Create self-hosted API and Control package
         run: tar -czf skyspy-api.tar.gz services/api README.md SECURITY.md
       - name: Upload API package
         uses: actions/upload-artifact@v4
