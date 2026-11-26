@@ -60,6 +60,13 @@ try {
   const initialStatus = await request("/api/auth/status");
   assert.equal(initialStatus.status, 200);
   assert.equal(initialStatus.body.configured, false);
+  assert.equal(initialStatus.body.localAccess, true);
+
+  const remoteStatus = await request("/api/auth/status", {
+    headers: { Host: "192.168.1.50" }
+  });
+  assert.equal(remoteStatus.status, 200);
+  assert.equal(remoteStatus.body.localAccess, false);
 
   const setup = await request("/api/auth/setup", {
     method: "POST",
@@ -87,8 +94,14 @@ try {
   assert.equal(login.status, 200);
   assert.ok(login.body.token);
 
-  const unauthenticatedInventory = await request("/api/devices");
-  assert.equal(unauthenticatedInventory.status, 401);
+  const localInventory = await request("/api/devices");
+  assert.equal(localInventory.status, 200);
+  assert.deepEqual(localInventory.body.devices, []);
+
+  const remoteInventoryWithoutLogin = await request("/api/devices", {
+    headers: { Host: "192.168.1.50" }
+  });
+  assert.equal(remoteInventoryWithoutLogin.status, 401);
 
   const installId = randomUUID();
   const diagnostics = {
@@ -115,8 +128,13 @@ try {
   assert.ok(registration.body.deviceId);
   assert.ok(registration.body.deviceToken);
 
+  const localInventoryAfterRegistration = await request("/api/devices");
+  assert.equal(localInventoryAfterRegistration.status, 200);
+  assert.equal(localInventoryAfterRegistration.body.devices.length, 1);
+  assert.equal(localInventoryAfterRegistration.body.devices[0].model, diagnostics.model);
+
   const inventory = await request("/api/devices", {
-    headers: { Authorization: "Bearer " + login.body.token }
+    headers: { Host: "192.168.1.50", Authorization: "Bearer " + login.body.token }
   });
   assert.equal(inventory.status, 200);
   assert.equal(inventory.body.devices.length, 1);
@@ -148,24 +166,24 @@ try {
   assert.equal(unpair.status, 200);
 
   const emptyInventory = await request("/api/devices", {
-    headers: { Authorization: "Bearer " + login.body.token }
+    headers: { Host: "192.168.1.50", Authorization: "Bearer " + login.body.token }
   });
   assert.equal(emptyInventory.status, 200);
   assert.equal(emptyInventory.body.devices.length, 0);
 
   const logout = await request("/api/auth/logout", {
     method: "POST",
-    headers: { Authorization: "Bearer " + login.body.token },
+    headers: { Host: "192.168.1.50", Authorization: "Bearer " + login.body.token },
     body: "{}"
   });
   assert.equal(logout.status, 200);
 
   const afterLogout = await request("/api/devices", {
-    headers: { Authorization: "Bearer " + login.body.token }
+    headers: { Host: "192.168.1.50", Authorization: "Bearer " + login.body.token }
   });
   assert.equal(afterLogout.status, 401);
 
-  console.log("PASS: default configuration, admin setup/login/logout, consent-gated no-code registration, inventory, token rotation, heartbeat and unpair.");
+  console.log("PASS: loopback Control without operator login, remote inventory auth, admin setup/login/logout, consent-gated enrollment, token rotation, heartbeat and unpair.");
 } finally {
   child.kill("SIGTERM");
   await rm(dataDir, { recursive: true, force: true });
