@@ -223,7 +223,7 @@ async function serveControlApp(route, response) {
   } catch {
     return false;
   }
-  const relative = requestedPath === "/" ? "index.html" : requestedPath.replace(/^\\/+/, "");
+  const relative = requestedPath === "/" ? "index.html" : requestedPath.replace(/^\/+/, "");
   const filePath = path.resolve(PUBLIC_DIR, relative);
   if (filePath !== PUBLIC_DIR && !filePath.startsWith(PUBLIC_DIR + path.sep)) return false;
 
