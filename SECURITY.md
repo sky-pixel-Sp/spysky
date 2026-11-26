@@ -8,6 +8,9 @@ SkySpy LAN is for devices owned by the operator or devices whose owner knowingly
 
 - First admin setup is restricted to a loopback request and can only happen once.
 - Admin passwords are stored as salted scrypt hashes.
+- Personal Local Mode allows read-only device inventory and detail requests without an operator password only when both the TCP peer and Host header identify the server computer's loopback interface.
+- Requests from another computer or phone on the LAN are not loopback and still require an operator session; the local exception is not based on a client-supplied flag.
+- Companion heartbeats continue to require the enrolled device's per-installation credential. The credential is stored in the app's private storage and is not an operator password.
 - Operator sessions use random bearer tokens with a 12-hour lifetime and are held in memory.
 - Companion registration requires an explicit `consent: true` confirmation and a stable per-installation UUID.
 - Device credentials are unique random tokens; only SHA-256 digests are stored by the API.
