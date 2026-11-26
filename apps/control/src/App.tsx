@@ -43,7 +43,7 @@ export default function App() {
   const [notice, setNotice] = useState("");
   const [lastRefresh, setLastRefresh] = useState("");
 
-  const normalizedApi = useMemo(() => apiBase.trim().replace(/\\/+$/, ""), [apiBase]);
+  const normalizedApi = useMemo(() => apiBase.trim().replace(/\/+$/, ""), [apiBase]);
   const selectedDevice = devices.find((device) => device.id === selectedId) ?? null;
   const onlineCount = devices.filter((device) => device.status === "online").length;
   const isSetup = authStatus === "setup";
@@ -127,7 +127,12 @@ export default function App() {
       sessionStorage.setItem("skyspy.session", result.token);
       setPassword("");
       setConfirmPassword("");
-      const data = await request<{ devices: Device[] }>("/api/devices");
+      const deviceResponse = await fetch(normalizedApi + "/api/devices", {
+        headers: { Authorization: "Bearer " + result.token },
+        cache: "no-store"
+      });
+      if (!deviceResponse.ok) throw new Error("Signed in, but device inventory could not be loaded.");
+      const data = await deviceResponse.json() as { devices: Device[] };
       setDevices(data.devices);
       setSelectedId(data.devices[0]?.id ?? null);
       setLastRefresh(new Date().toISOString());
