@@ -36,6 +36,7 @@ export default function App() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [authStatus, setAuthStatus] = useState<AuthStatus>("loading");
   const [sessionToken, setSessionToken] = useState("");
+  const [localMode, setLocalMode] = useState(false);
   const [devices, setDevices] = useState<Device[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -75,10 +76,29 @@ export default function App() {
       setError("");
       try {
         const statusResponse = await fetch(normalizedApi + "/api/auth/status", { cache: "no-store" });
-        const status = await statusResponse.json() as { configured?: boolean; error?: string };
+        const status = await statusResponse.json() as { configured?: boolean; localAccess?: boolean; error?: string };
         if (!statusResponse.ok) throw new Error(status.error || "Could not reach SkySpy server.");
         if (!active) return;
         localStorage.setItem("skyspy.apiBase", normalizedApi);
+
+        // No operator password is requested when the browser is running on
+        // the SkySpy server computer itself (loopback only).
+        if (status.localAccess) {
+          const localResponse = await fetch(normalizedApi + "/api/devices", { cache: "no-store" });
+          if (!localResponse.ok) throw new Error("Local Control access could not load the device inventory.");
+          const data = await localResponse.json() as { devices: Device[] };
+          if (!active) return;
+          sessionStorage.removeItem("skyspy.session");
+          setSessionToken("");
+          setLocalMode(true);
+          setDevices(data.devices);
+          setSelectedId(data.devices[0]?.id ?? null);
+          setLastRefresh(new Date().toISOString());
+          setAuthStatus("authenticated");
+          return;
+        }
+
+        setLocalMode(false);
         const stored = sessionStorage.getItem("skyspy.session") ?? "";
         if (stored) {
           const response = await fetch(normalizedApi + "/api/devices", {
@@ -89,6 +109,7 @@ export default function App() {
             const data = await response.json() as { devices: Device[] };
             if (!active) return;
             setSessionToken(stored);
+            setLocalMode(false);
             setDevices(data.devices);
             setSelectedId(data.devices[0]?.id ?? null);
             setLastRefresh(new Date().toISOString());
@@ -124,6 +145,7 @@ export default function App() {
         { method: "POST", body: JSON.stringify({ password }) }
       );
       setSessionToken(result.token);
+      setLocalMode(false);
       sessionStorage.setItem("skyspy.session", result.token);
       setPassword("");
       setConfirmPassword("");
@@ -155,6 +177,7 @@ export default function App() {
       if (errorMessage(reason).includes("Sign in")) {
         sessionStorage.removeItem("skyspy.session");
         setSessionToken("");
+        setLocalMode(false);
         setAuthStatus("login");
       }
     } finally {
@@ -170,6 +193,7 @@ export default function App() {
     }
     sessionStorage.removeItem("skyspy.session");
     setSessionToken("");
+    setLocalMode(false);
     setDevices([]);
     setSelectedId(null);
     setAuthStatus("login");
@@ -195,7 +219,7 @@ export default function App() {
         <button className="nav-item" type="button" onClick={() => setNotice("Activity history is planned for a later milestone.")}><span className="nav-icon">◷</span> Activity<span className="nav-soon">SOON</span></button>
         <div className="sidebar-bottom">
           <div className="security-note"><span className="security-dot" /><div><strong>Owner-approved enrollment</strong><small>No pairing code required</small></div></div>
-          <div className="sidebar-version">SKYSPY CONTROL · 0.2.0</div>
+          <div className="sidebar-version">SKYSPY CONTROL · 0.2.2</div>
         </div>
       </aside>
 
@@ -291,13 +315,17 @@ export default function App() {
                 </div>
               </aside>
             </section>
-            <div className="session-actions"><span>Signed in securely</span><button className="button button-secondary" onClick={signOut} type="button">Sign out</button></div>
+            <div className="session-actions">
+              {localMode
+                ? <span>Local-only mode · no operator password required on this computer</span>
+                : <><span>Signed in securely</span><button className="button button-secondary" onClick={signOut} type="button">Sign out</button></>}
+            </div>
           </>
         )}
 
         {error && <div role="alert" className="toast error-toast">{error}</div>}
         {notice && <div role="status" className="toast notice-toast">{notice}<button onClick={() => setNotice("")} type="button" aria-label="Dismiss">×</button></div>}
-        <footer className="page-footer"><span>SkySpy LAN · Owner-approved device management</span><span>Control build 0.2.0</span></footer>
+        <footer className="page-footer"><span>SkySpy LAN · Owner-approved device management</span><span>Control build 0.2.2</span></footer>
       </main>
     </div>
   );
