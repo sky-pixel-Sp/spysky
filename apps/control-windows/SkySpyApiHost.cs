@@ -77,101 +77,111 @@ public sealed class SkySpyApiHost : IAsyncDisposable
             version = "0.3.0"
         }));
 
-        app.MapPost("/api/device/register", async (HttpContext context, RegistrationRequest? request, DeviceStore deviceStore) =>
-        {
-            if (!IsPrivateLanClient(context))
-            {
-                return Results.Forbid();
-            }
-
-            if (request is null)
-            {
-                return Results.BadRequest(new { error = "A registration body is required." });
-            }
-
-            if (request.Consent != true)
-            {
-                return Results.Json(new
-                {
-                    error = "The device owner must approve sharing the listed diagnostics."
-                }, statusCode: StatusCodes.Status403Forbidden);
-            }
-
-            if (!Guid.TryParse(request.InstallId, out Guid installId))
-            {
-                return Results.BadRequest(new { error = "Companion installation identity is invalid." });
-            }
-
-            if (request.Device is null || string.IsNullOrWhiteSpace(request.Device.Model))
-            {
-                return Results.BadRequest(new { error = "Device model is required." });
-            }
-
-            RegistrationResult registered = await deviceStore.RegisterAsync(
-                installId,
-                request.Device,
-                request.DeviceName);
-
-            return Results.Json(new
-            {
-                deviceId = registered.DeviceId,
-                deviceToken = registered.DeviceToken,
-                registeredAt = registered.RegisteredAt,
-                message = "Device registered after owner approval."
-            }, statusCode: StatusCodes.Status201Created);
-        });
-
-        app.MapPost("/api/device/heartbeat", async (HttpContext context, HeartbeatRequest? request, DeviceStore deviceStore) =>
-        {
-            if (!IsPrivateLanClient(context))
-            {
-                return Results.Forbid();
-            }
-
-            string token = BearerToken(context);
-            if (string.IsNullOrWhiteSpace(token))
-            {
-                return Results.Unauthorized();
-            }
-
-            DeviceRecord? updated = await deviceStore.HeartbeatAsync(token, request?.Device);
-            if (updated is null)
-            {
-                return Results.Json(new { error = "Device session is invalid. Connect this Companion again." },
-                    statusCode: StatusCodes.Status401Unauthorized);
-            }
-
-            return Results.Ok(new
-            {
-                ok = true,
-                deviceId = updated.Id,
-                lastSeenAt = updated.LastSeenAt
-            });
-        });
-
-        app.MapPost("/api/device/unpair", async (HttpContext context, DeviceStore deviceStore) =>
-        {
-            if (!IsPrivateLanClient(context))
-            {
-                return Results.Forbid();
-            }
-
-            string token = BearerToken(context);
-            if (string.IsNullOrWhiteSpace(token) || !await deviceStore.UnpairAsync(token))
-            {
-                return Results.Json(new { error = "Device session is invalid." },
-                    statusCode: StatusCodes.Status401Unauthorized);
-            }
-
-            return Results.Ok(new
-            {
-                ok = true,
-                message = "Device removed from Control inventory."
-            });
-        });
+        app.MapPost("/api/device/register", RegisterDeviceAsync);
+        app.MapPost("/api/device/heartbeat", HeartbeatAsync);
+        app.MapPost("/api/device/unpair", UnpairDeviceAsync);
 
         await app.StartAsync();
         return new SkySpyApiHost(app, store);
+    }
+
+    private static async Task<IResult> RegisterDeviceAsync(
+        HttpContext context,
+        RegistrationRequest? request,
+        DeviceStore deviceStore)
+    {
+        if (!IsPrivateLanClient(context))
+        {
+            return Results.Forbid();
+        }
+
+        if (request is null)
+        {
+            return Results.BadRequest(new { error = "A registration body is required." });
+        }
+
+        if (request.Consent != true)
+        {
+            return Results.Json(new
+            {
+                error = "The device owner must approve sharing the listed diagnostics."
+            }, statusCode: StatusCodes.Status403Forbidden);
+        }
+
+        if (!Guid.TryParse(request.InstallId, out Guid installId))
+        {
+            return Results.BadRequest(new { error = "Companion installation identity is invalid." });
+        }
+
+        if (request.Device is null || string.IsNullOrWhiteSpace(request.Device.Model))
+        {
+            return Results.BadRequest(new { error = "Device model is required." });
+        }
+
+        RegistrationResult registered = await deviceStore.RegisterAsync(
+            installId,
+            request.Device,
+            request.DeviceName);
+
+        return Results.Json(new
+        {
+            deviceId = registered.DeviceId,
+            deviceToken = registered.DeviceToken,
+            registeredAt = registered.RegisteredAt,
+            message = "Device registered after owner approval."
+        }, statusCode: StatusCodes.Status201Created);
+    }
+
+    private static async Task<IResult> HeartbeatAsync(
+        HttpContext context,
+        HeartbeatRequest? request,
+        DeviceStore deviceStore)
+    {
+        if (!IsPrivateLanClient(context))
+        {
+            return Results.Forbid();
+        }
+
+        string token = BearerToken(context);
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            return Results.Unauthorized();
+        }
+
+        DeviceRecord? updated = await deviceStore.HeartbeatAsync(token, request?.Device);
+        if (updated is null)
+        {
+            return Results.Json(new { error = "Device session is invalid. Connect this Companion again." },
+                statusCode: StatusCodes.Status401Unauthorized);
+        }
+
+        return Results.Ok(new
+        {
+            ok = true,
+            deviceId = updated.Id,
+            lastSeenAt = updated.LastSeenAt
+        });
+    }
+
+    private static async Task<IResult> UnpairDeviceAsync(HttpContext context, DeviceStore deviceStore)
+    {
+        if (!IsPrivateLanClient(context))
+        {
+            return Results.Forbid();
+        }
+
+        string token = BearerToken(context);
+        if (string.IsNullOrWhiteSpace(token) || !await deviceStore.UnpairAsync(token))
+        {
+            return Results.Json(new { error = "Device session is invalid." },
+                statusCode: StatusCodes.Status401Unauthorized);
+        }
+
+        return Results.Ok(new
+        {
+            ok = true,
+            message = "Device removed from Control inventory."
+        });
     }
 
     private static IPAddress[] GetPrivateLanAddresses() =>
