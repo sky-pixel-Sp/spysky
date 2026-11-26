@@ -181,12 +181,33 @@ class MainActivity : Activity() {
     }
 
     private fun unpairDevice() {
-        handler.removeCallbacks(heartbeatTask)
-        preferences.edit().clear().apply()
-        serverInput.setText("")
-        codeInput.text.clear()
-        renderPairingState()
-        statusText.text = "This device is unpaired. No further heartbeats will be sent."
+        val baseUrl = preferences.getString(KEY_SERVER_URL, null)
+        val token = preferences.getString(KEY_DEVICE_TOKEN, null)
+        if (baseUrl.isNullOrBlank() || token.isNullOrBlank()) {
+            preferences.edit().clear().apply()
+            renderPairingState()
+            statusText.text = "This device is not paired."
+            return
+        }
+
+        statusText.text = "Requesting server-side unpair…"
+        Thread {
+            try {
+                ApiClient.postJson(baseUrl, "/api/device/unpair", JSONObject(), token)
+                preferences.edit().clear().apply()
+                runOnUiThread {
+                    handler.removeCallbacks(heartbeatTask)
+                    serverInput.setText("")
+                    codeInput.text.clear()
+                    renderPairingState()
+                    statusText.text = "Unpaired. This device was removed from the Control inventory."
+                }
+            } catch (error: Exception) {
+                runOnUiThread {
+                    statusText.text = "Unpair could not be confirmed: ${error.message ?: "Server unavailable"}. Pairing data was kept."
+                }
+            }
+        }.start()
     }
 
     private fun renderPairingState() {
