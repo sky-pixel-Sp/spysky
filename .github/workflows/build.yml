@@ -1,4 +1,4 @@
-name: Build SkySpy LAN
+name: Build SkySpy Applications
 
 on:
   push:
@@ -11,46 +11,32 @@ permissions:
   contents: read
 
 jobs:
-  verify-api:
-    name: Verify API and owner-approved enrollment
-    runs-on: ubuntu-latest
+  build-control-windows:
+    name: Test and build native Windows Control
+    runs-on: windows-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Set up Node.js 26 LTS
-        uses: actions/setup-node@v4
+      - name: Set up .NET 8
+        uses: actions/setup-dotnet@v4
         with:
-          node-version: 26
-      - name: Check API syntax
-        working-directory: services/api
-        run: npm run check
-      - name: Run auth, no-code registration, heartbeat and unpair tests
-        working-directory: services/api
-        run: npm test
-
-  build-control:
-    name: Build SkySpy Control
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Set up Node.js 26 LTS
-        uses: actions/setup-node@v4
-        with:
-          node-version: 26
-          cache: npm
-          cache-dependency-path: apps/control/package.json
-      - name: Install dependencies
-        working-directory: apps/control
-        run: npm install
-      - name: Type-check and build Control
-        working-directory: apps/control
-        run: npm run build
-      - name: Upload Control web build
+          dotnet-version: 8.0.x
+      - name: Test device store and credential lifecycle
+        run: dotnet test apps/control-windows.Tests/SkySpy.Control.Tests.csproj --configuration Release
+      - name: Publish self-contained Windows x64 application
+        shell: pwsh
+        run: |
+          dotnet publish apps/control-windows/SkySpy.Control.csproj --configuration Release --runtime win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=None -p:DebugSymbols=false --output artifacts/publish
+          New-Item -ItemType Directory -Force -Path artifacts/package | Out-Null
+          Copy-Item artifacts/publish/SkySpy.Control.exe artifacts/package/SkySpy.Control.exe
+          Copy-Item README.md artifacts/package/README.md
+          Copy-Item SECURITY.md artifacts/package/SECURITY.md
+          Compress-Archive -Path artifacts/package/* -DestinationPath artifacts/SkySpy-Control-Windows-x64.zip -Force
+      - name: Upload Windows desktop application
         uses: actions/upload-artifact@v4
         with:
-          name: skyspy-control-web
-          path: apps/control/dist/
+          name: skyspy-control-windows-x64
+          path: artifacts/SkySpy-Control-Windows-x64.zip
           if-no-files-found: error
 
   build-companion:
@@ -76,25 +62,4 @@ jobs:
         with:
           name: skyspy-companion-debug-apk
           path: apps/companion/app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
-
-  package-api:
-    name: Package API and Control app
-    needs: build-control
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Download Control web build
-        uses: actions/download-artifact@v4
-        with:
-          name: skyspy-control-web
-          path: services/api/public
-      - name: Create self-hosted API and Control package
-        run: tar -czf skyspy-api.tar.gz services/api README.md SECURITY.md
-      - name: Upload API package
-        uses: actions/upload-artifact@v4
-        with:
-          name: skyspy-api-service
-          path: skyspy-api.tar.gz
           if-no-files-found: error

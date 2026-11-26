@@ -6,19 +6,18 @@ SkySpy LAN is for devices owned by the operator or devices whose owner knowingly
 
 ## Current safeguards
 
-- First admin setup is restricted to a loopback request and can only happen once.
-- Admin passwords are stored as salted scrypt hashes.
-- Personal Local Mode allows read-only device inventory and detail requests without an operator password only when both the TCP peer and Host header identify the server computer's loopback interface.
-- Requests from another computer or phone on the LAN are not loopback and still require an operator session; the local exception is not based on a client-supplied flag.
-- Companion heartbeats continue to require the enrolled device's per-installation credential. The credential is stored in the app's private storage and is not an operator password.
-- Operator sessions use random bearer tokens with a 12-hour lifetime and are held in memory.
-- Companion registration requires an explicit `consent: true` confirmation and a stable per-installation UUID.
-- Device credentials are unique random tokens; only SHA-256 digests are stored by the API.
-- Re-registering the same installation rotates its device token without creating a duplicate inventory record.
-- Registration and login attempts are rate-limited.
-- API metadata is allow-listed and length-limited.
-- Companion requests only the Android INTERNET permission in this milestone.
-- Public endpoints must use HTTPS. Plain HTTP is allowed by the Companion only for localhost and private IPv4 LAN addresses.
+- SkySpy Control is a native Windows WPF application. There is no website, browser dashboard, PWA, embedded browser, or static web content.
+- The local API runs inside the visible desktop application process and stops when that application closes.
+- The embedded API binds only to loopback and detected private IPv4 interfaces.
+- Browser-origin requests are rejected; no CORS access is enabled.
+- The API exposes no network endpoint for reading the device inventory. The desktop UI reads the local data store directly.
+- Companion registration requires explicit owner approval and a stable per-installation UUID.
+- Companion heartbeats and unpair requests require the enrolled device's unique credential.
+- Device credentials are random and only SHA-256 digests are stored by the Windows app.
+- Re-registering the same installation rotates its device credential without creating a duplicate inventory record.
+- API request bodies and metadata fields are size-limited and allow-listed.
+- Companion requests only the permissions required for its visible diagnostics and network connection.
+- Plain HTTP is intended only for localhost and private IPv4 LAN connections.
 
 ## Not implemented
 
@@ -26,4 +25,4 @@ There is no remote shell, SMS/OTP access, contacts access, notification capture,
 
 ## Reporting
 
-Do not publish passwords, session tokens, device tokens, personal device information, or exploit details in public issues. For a security concern, contact the repository owner privately.
+Do not publish device credentials, personal device information, or exploit details in public issues. For a security concern, contact the repository owner privately.
