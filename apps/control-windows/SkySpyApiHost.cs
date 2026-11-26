@@ -1,3 +1,6 @@
+using System.Net;
+using System.Net.NetworkInformation;
+using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -38,10 +41,15 @@ public sealed class SkySpyApiHost : IAsyncDisposable
             ApplicationName = typeof(SkySpyApiHost).Assembly.FullName
         });
         builder.Logging.ClearProviders();
+        IPAddress[] privateAddresses = GetPrivateLanAddresses();
         builder.WebHost.ConfigureKestrel(options =>
         {
             options.Limits.MaxRequestBodySize = 16 * 1024;
-            options.ListenAnyIP(8787);
+            options.ListenLocalhost(8787);
+            foreach (IPAddress address in privateAddresses)
+            {
+                options.Listen(address, 8787);
+            }
         });
         builder.Services.AddSingleton(store);
 
@@ -69,8 +77,13 @@ public sealed class SkySpyApiHost : IAsyncDisposable
             version = "0.3.0"
         }));
 
-        app.MapPost("/api/device/register", async (RegistrationRequest? request, DeviceStore deviceStore) =>
+        app.MapPost("/api/device/register", async (HttpContext context, RegistrationRequest? request, DeviceStore deviceStore) =>
         {
+            if (!IsPrivateLanClient(context))
+            {
+                return Results.Forbid();
+            }
+
             if (request is null)
             {
                 return Results.BadRequest(new { error = "A registration body is required." });
@@ -110,6 +123,11 @@ public sealed class SkySpyApiHost : IAsyncDisposable
 
         app.MapPost("/api/device/heartbeat", async (HttpContext context, HeartbeatRequest? request, DeviceStore deviceStore) =>
         {
+            if (!IsPrivateLanClient(context))
+            {
+                return Results.Forbid();
+            }
+
             string token = BearerToken(context);
             if (string.IsNullOrWhiteSpace(token))
             {
@@ -133,6 +151,11 @@ public sealed class SkySpyApiHost : IAsyncDisposable
 
         app.MapPost("/api/device/unpair", async (HttpContext context, DeviceStore deviceStore) =>
         {
+            if (!IsPrivateLanClient(context))
+            {
+                return Results.Forbid();
+            }
+
             string token = BearerToken(context);
             if (string.IsNullOrWhiteSpace(token) || !await deviceStore.UnpairAsync(token))
             {
@@ -149,6 +172,44 @@ public sealed class SkySpyApiHost : IAsyncDisposable
 
         await app.StartAsync();
         return new SkySpyApiHost(app, store);
+    }
+
+    private static IPAddress[] GetPrivateLanAddresses() =>
+        NetworkInterface.GetAllNetworkInterfaces()
+            .Where(adapter => adapter.OperationalStatus == OperationalStatus.Up)
+            .SelectMany(adapter => adapter.GetIPProperties().UnicastAddresses)
+            .Select(item => item.Address)
+            .Where(IsPrivateIPv4)
+            .Distinct()
+            .ToArray();
+
+    private static bool IsPrivateIPv4(IPAddress address)
+    {
+        if (address.AddressFamily != AddressFamily.InterNetwork || IPAddress.IsLoopback(address))
+        {
+            return false;
+        }
+
+        byte[] bytes = address.GetAddressBytes();
+        return bytes[0] == 10
+            || (bytes[0] == 172 && bytes[1] >= 16 && bytes[1] <= 31)
+            || (bytes[0] == 192 && bytes[1] == 168);
+    }
+
+    private static bool IsPrivateLanClient(HttpContext context)
+    {
+        IPAddress? address = context.Connection.RemoteIpAddress;
+        if (address is null)
+        {
+            return false;
+        }
+
+        if (address.IsIPv4MappedToIPv6)
+        {
+            address = address.MapToIPv4();
+        }
+
+        return IPAddress.IsLoopback(address) || IsPrivateIPv4(address);
     }
 
     private static string BearerToken(HttpContext context)
