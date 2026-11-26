@@ -8,19 +8,22 @@ import android.os.Looper
 import android.view.Gravity
 import android.view.ViewGroup
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import org.json.JSONObject
+import java.util.UUID
 
 class MainActivity : Activity() {
     private val preferences by lazy { getSharedPreferences("skyspy_companion", MODE_PRIVATE) }
     private val handler = Handler(Looper.getMainLooper())
     private lateinit var serverInput: EditText
-    private lateinit var codeInput: EditText
+    private lateinit var consentCheck: CheckBox
     private lateinit var statusText: TextView
-    private lateinit var pairedText: TextView
+    private lateinit var registeredText: TextView
+    private lateinit var connectButton: Button
 
     private val heartbeatTask = object : Runnable {
         override fun run() {
@@ -32,7 +35,7 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         buildScreen()
-        renderPairingState()
+        renderRegistrationState()
     }
 
     override fun onResume() {
@@ -61,21 +64,17 @@ class MainActivity : Activity() {
         scroll.addView(content)
         setContentView(scroll)
 
-        val brand = TextView(this).apply {
+        content.addView(TextView(this).apply {
             text = "SKYSPY  /  COMPANION"
             setTextColor(Color.rgb(139, 177, 255))
             textSize = 11f
             letterSpacing = 0.14f
-        }
-        content.addView(brand)
+        })
 
-        val title = text("Your device. Your permission.", 25f, Color.WHITE, true)
-        val titleParams = params(top = 18)
-        content.addView(title, titleParams)
-
+        content.addView(text("Connect your device.", 27f, Color.WHITE, true), params(top = 18))
         content.addView(
             text(
-                "This app shares a small set of device diagnostics with the SkySpy Control panel after you enter a pairing code.",
+                "Your device appears in SkySpy Control only after you choose to connect and approve sharing the diagnostics below.",
                 14f,
                 Color.rgb(155, 169, 190),
                 false
@@ -84,61 +83,102 @@ class MainActivity : Activity() {
         )
 
         val consentCard = card()
-        consentCard.addView(text("WHAT IS SHARED", 10f, Color.rgb(139, 177, 255), true))
-        consentCard.addView(text("• Device manufacturer and model\n• Android version and security patch\n• Battery level and charging state\n• Connection heartbeat while this app is open", 13f, Color.rgb(204, 216, 232), false), params(top = 10))
-        consentCard.addView(text("No SMS, contacts, notifications, passwords, camera, microphone, location, or screen content is collected.", 12f, Color.rgb(238, 190, 145), false), params(top = 12))
+        consentCard.addView(text("INFORMATION SHARED", 10f, Color.rgb(139, 177, 255), true))
+        consentCard.addView(
+            text(
+                "• Manufacturer and model\n• Android version and security patch\n• Battery level and charging state\n• App version and connection status",
+                13f,
+                Color.rgb(204, 216, 232),
+                false
+            ),
+            params(top = 10)
+        )
+        consentCard.addView(
+            text(
+                "No SMS, contacts, call history, notifications, passwords, camera, microphone, location, or screen contents are collected.",
+                12f,
+                Color.rgb(238, 190, 145),
+                false
+            ),
+            params(top = 12)
+        )
         content.addView(consentCard, params(top = 25))
 
-        content.addView(text("SERVER ADDRESS", 10f, Color.rgb(130, 148, 173), true), params(top = 25))
-        serverInput = editText("https://your-server.example")
+        content.addView(text("SKYSPY SERVER ADDRESS", 10f, Color.rgb(130, 148, 173), true), params(top = 25))
+        serverInput = editText("http://192.168.1.10:8787")
         serverInput.setText(preferences.getString(KEY_SERVER_URL, ""))
         content.addView(serverInput, params(top = 8))
 
-        content.addView(text("SIX-DIGIT PAIRING CODE", 10f, Color.rgb(130, 148, 173), true), params(top = 18))
-        codeInput = editText("Enter code shown in Control")
-        codeInput.inputType = android.text.InputType.TYPE_CLASS_NUMBER
-        content.addView(codeInput, params(top = 8))
+        consentCheck = CheckBox(this).apply {
+            text = "I understand and agree to share only the diagnostics listed above with this SkySpy server."
+            setTextColor(Color.rgb(201, 215, 233))
+            textSize = 12f
+            buttonTintList = android.content.res.ColorStateList.valueOf(Color.rgb(111, 157, 255))
+            setPadding(0, dp(8), 0, dp(8))
+        }
+        content.addView(consentCheck, params(top = 16))
 
-        val pairButton = button("Pair this device")
-        pairButton.setOnClickListener { pairDevice() }
-        content.addView(pairButton, params(top = 18))
+        connectButton = button("Connect this device")
+        connectButton.isEnabled = false
+        connectButton.setOnClickListener { registerDevice() }
+        content.addView(connectButton, params(top = 12))
 
-        pairedText = text("", 12f, Color.rgb(160, 190, 235), false)
-        content.addView(pairedText, params(top = 18))
+        registeredText = text("", 12f, Color.rgb(160, 190, 235), false)
+        content.addView(registeredText, params(top = 18))
 
-        val unpairButton = button("Unpair this device")
+        val unpairButton = button("Disconnect and remove device")
         unpairButton.setBackgroundColor(Color.rgb(46, 56, 71))
         unpairButton.setOnClickListener { unpairDevice() }
-        content.addView(unpairButton, params(top = 10))
+        content.addView(unpairButton, params(top = 12))
 
         statusText = text("Not connected", 12f, Color.rgb(151, 165, 185), false)
         content.addView(statusText, params(top = 22))
         content.addView(
-            text("Heartbeat runs only while this Companion screen is open. You can unpair here or uninstall the app at any time.", 11f, Color.rgb(107, 122, 143), false),
+            text(
+                "The app sends a heartbeat while this screen is open. Disconnect here or uninstall Companion at any time. No pairing code or operator password is required on this device.",
+                11f,
+                Color.rgb(107, 122, 143),
+                false
+            ),
             params(top = 10)
         )
+
+        consentCheck.setOnCheckedChangeListener { _, checked ->
+            connectButton.isEnabled = checked
+        }
     }
 
-    private fun pairDevice() {
+    private fun installationId(): String {
+        val existing = preferences.getString(KEY_INSTALL_ID, null)
+        if (!existing.isNullOrBlank()) return existing
+        val created = UUID.randomUUID().toString()
+        preferences.edit().putString(KEY_INSTALL_ID, created).apply()
+        return created
+    }
+
+    private fun registerDevice() {
         val baseUrl = serverInput.text.toString().trim().trimEnd('/')
-        val code = codeInput.text.toString().trim()
         if (!ApiClient.isAllowedServerUrl(baseUrl)) {
-            statusText.text = "Use HTTPS remotely, or a private IPv4 address for trusted LAN HTTP."
+            statusText.text = "Use HTTPS remotely, or a private IPv4 address for trusted LAN."
             return
         }
-        if (!Regex("^\\d{6}$").matches(code)) {
-            statusText.text = "Enter the six-digit code from SkySpy Control."
+        if (!consentCheck.isChecked) {
+            statusText.text = "Approve the diagnostics sharing notice before connecting."
             return
         }
 
-        statusText.text = "Connecting and requesting device pairing…"
+        connectButton.isEnabled = false
+        statusText.text = "Connecting this device to SkySpy Control…"
         Thread {
             try {
                 val info = DeviceInfo.collect(this)
                 val response = ApiClient.postJson(
                     baseUrl,
-                    "/api/pairing/claim",
-                    JSONObject().put("code", code).put("device", info.toJson())
+                    "/api/device/register",
+                    JSONObject()
+                        .put("installId", installationId())
+                        .put("consent", true)
+                        .put("device", info.toJson())
                 )
                 val deviceId = response.getString("deviceId")
                 val deviceToken = response.getString("deviceToken")
@@ -148,15 +188,16 @@ class MainActivity : Activity() {
                     .putString(KEY_DEVICE_TOKEN, deviceToken)
                     .apply()
                 runOnUiThread {
-                    codeInput.text.clear()
-                    renderPairingState()
-                    statusText.text = "Paired successfully. Sending status while this app is open."
+                    renderRegistrationState()
+                    statusText.text = "Connected. This device should now appear in SkySpy Control."
                     handler.removeCallbacks(heartbeatTask)
                     handler.post(heartbeatTask)
+                    consentCheck.isChecked = false
                 }
             } catch (error: Exception) {
                 runOnUiThread {
-                    statusText.text = "Pairing failed: ${error.message ?: "Unknown error"}"
+                    statusText.text = "Connection failed: ${error.message ?: "Unknown error"}"
+                    connectButton.isEnabled = consentCheck.isChecked
                 }
             }
         }.start()
@@ -173,7 +214,7 @@ class MainActivity : Activity() {
                     JSONObject().put("device", DeviceInfo.collect(this).toJson()),
                     token
                 )
-                runOnUiThread { statusText.text = "Connected · last heartbeat just now" }
+                runOnUiThread { statusText.text = "Connected · heartbeat sent just now" }
             } catch (error: Exception) {
                 runOnUiThread { statusText.text = "Connection issue: ${error.message ?: "Server unavailable"}" }
             }
@@ -184,39 +225,39 @@ class MainActivity : Activity() {
         val baseUrl = preferences.getString(KEY_SERVER_URL, null)
         val token = preferences.getString(KEY_DEVICE_TOKEN, null)
         if (baseUrl.isNullOrBlank() || token.isNullOrBlank()) {
-            preferences.edit().clear().apply()
-            renderPairingState()
-            statusText.text = "This device is not paired."
+            statusText.text = "This device is not connected."
             return
         }
 
-        statusText.text = "Requesting server-side unpair…"
+        statusText.text = "Removing this device from Control…"
         Thread {
             try {
                 ApiClient.postJson(baseUrl, "/api/device/unpair", JSONObject(), token)
-                preferences.edit().clear().apply()
+                preferences.edit()
+                    .remove(KEY_SERVER_URL)
+                    .remove(KEY_DEVICE_ID)
+                    .remove(KEY_DEVICE_TOKEN)
+                    .apply()
                 runOnUiThread {
                     handler.removeCallbacks(heartbeatTask)
-                    serverInput.setText("")
-                    codeInput.text.clear()
-                    renderPairingState()
-                    statusText.text = "Unpaired. This device was removed from the Control inventory."
+                    renderRegistrationState()
+                    statusText.text = "Disconnected. This device was removed from Control."
                 }
             } catch (error: Exception) {
                 runOnUiThread {
-                    statusText.text = "Unpair could not be confirmed: ${error.message ?: "Server unavailable"}. Pairing data was kept."
+                    statusText.text = "Disconnect could not be confirmed: ${error.message ?: "Server unavailable"}"
                 }
             }
         }.start()
     }
 
-    private fun renderPairingState() {
+    private fun renderRegistrationState() {
         val deviceId = preferences.getString(KEY_DEVICE_ID, null)
         val server = preferences.getString(KEY_SERVER_URL, null)
-        if (deviceId.isNullOrBlank()) {
-            pairedText.text = "Not paired with a Control panel."
+        registeredText.text = if (deviceId.isNullOrBlank()) {
+            "This device is not connected to a Control panel."
         } else {
-            pairedText.text = "Paired device ID: $deviceId\nServer: $server"
+            "Connected device ID: " + deviceId + "\nServer: " + server
         }
     }
 
@@ -245,19 +286,15 @@ class MainActivity : Activity() {
         minHeight = dp(48)
     }
 
-    private fun text(
-        value: String,
-        size: Float,
-        color: Int,
-        bold: Boolean
-    ): TextView = TextView(this).apply {
-        text = value
-        textSize = size
-        setTextColor(color)
-        if (bold) setTypeface(typeface, android.graphics.Typeface.BOLD)
-        gravity = Gravity.START
-        setLineSpacing(dp(3).toFloat(), 1f)
-    }
+    private fun text(value: String, size: Float, color: Int, bold: Boolean): TextView =
+        TextView(this).apply {
+            text = value
+            textSize = size
+            setTextColor(color)
+            if (bold) setTypeface(typeface, android.graphics.Typeface.BOLD)
+            gravity = Gravity.START
+            setLineSpacing(dp(3).toFloat(), 1f)
+        }
 
     private fun params(top: Int = 0): LinearLayout.LayoutParams =
         LinearLayout.LayoutParams(
@@ -273,6 +310,7 @@ class MainActivity : Activity() {
         private const val KEY_SERVER_URL = "server_url"
         private const val KEY_DEVICE_ID = "device_id"
         private const val KEY_DEVICE_TOKEN = "device_token"
+        private const val KEY_INSTALL_ID = "install_id"
         private const val HEARTBEAT_INTERVAL_MS = 30_000L
     }
 }
