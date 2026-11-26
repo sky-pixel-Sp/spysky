@@ -4,36 +4,27 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { randomBytes, randomInt } from "node:crypto";
+import { randomUUID, randomInt } from "node:crypto";
 
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
 const serverFile = path.resolve(currentDir, "../src/server.mjs");
 const dataDir = await mkdtemp(path.join(tmpdir(), "skyspy-api-test-"));
-const port = 18_000 + randomInt(10_000);
-const token = randomBytes(32).toString("base64url");
-const baseUrl = `http://127.0.0.1:${port}`;
-
-const child = spawn(process.execPath, [serverFile], {
-  env: {
-    ...process.env,
-    SKYSPY_PORT: String(port),
-    SKYSPY_DATA_DIR: dataDir,
-    SKYSPY_ADMIN_TOKEN: token,
-    SKYSPY_ALLOWED_ORIGIN: "http://localhost:5173"
-  },
-  stdio: "ignore"
-});
+const port = 18000 + randomInt(10000);
+const baseUrl = "http://127.0.0.1:" + port;
+const child = spawn(process.execPath, [
+  serverFile,
+  "--port", String(port),
+  "--data-dir", dataDir
+], { stdio: "ignore" });
 
 async function waitForServer() {
   for (let attempt = 0; attempt < 60; attempt += 1) {
-    if (child.exitCode !== null) {
-      throw new Error("SkySpy API exited before becoming healthy.");
-    }
+    if (child.exitCode !== null) throw new Error("SkySpy API exited before becoming healthy.");
     try {
-      const response = await fetch(`${baseUrl}/health`);
+      const response = await fetch(baseUrl + "/health");
       if (response.ok) return;
     } catch {
-      // The local server may still be starting.
+      // Server may still be starting.
     }
     await new Promise((resolve) => setTimeout(resolve, 150));
   }
@@ -41,7 +32,7 @@ async function waitForServer() {
 }
 
 async function request(route, options = {}) {
-  const response = await fetch(`${baseUrl}${route}`, {
+  const response = await fetch(baseUrl + route, {
     ...options,
     headers: {
       "Content-Type": "application/json",
@@ -54,91 +45,119 @@ async function request(route, options = {}) {
 try {
   await waitForServer();
 
-  const unauthorized = await request("/api/devices");
-  assert.equal(unauthorized.status, 401, "device inventory must require operator auth");
+  const health = await request("/health");
+  assert.equal(health.status, 200);
+  assert.equal(health.body.ok, true);
 
-  const pairing = await request("/api/pairing", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${token}` },
-    body: "{}"
-  });
-  assert.equal(pairing.status, 201);
-  assert.match(pairing.body.code, /^\d{6}$/);
+  const initialStatus = await request("/api/auth/status");
+  assert.equal(initialStatus.status, 200);
+  assert.equal(initialStatus.body.configured, false);
 
-  const invalidClaim = await request("/api/pairing/claim", {
+  const setup = await request("/api/auth/setup", {
     method: "POST",
-    body: JSON.stringify({
-      code: "999999",
-      device: { model: "Test handset" }
-    })
+    body: JSON.stringify({ password: "SkySpy-Admin-First-Run-2026!" })
   });
-  assert.equal(invalidClaim.status, 400);
+  assert.equal(setup.status, 201);
+  assert.ok(setup.body.token);
 
-  const claim = await request("/api/pairing/claim", {
+  const secondSetup = await request("/api/auth/setup", {
     method: "POST",
-    body: JSON.stringify({
-      code: pairing.body.code,
-      device: {
-        manufacturer: "Sky Labs",
-        model: "Test handset",
-        androidVersion: "Android test",
-        securityPatch: "2026-10-01",
-        batteryPercent: 84,
-        charging: false,
-        appVersion: "0.1.0"
-      }
-    })
+    body: JSON.stringify({ password: "Another-Admin-Password-2026!" })
   });
-  assert.equal(claim.status, 201);
-  assert.ok(claim.body.deviceId);
-  assert.ok(claim.body.deviceToken);
+  assert.equal(secondSetup.status, 409);
+
+  const wrongLogin = await request("/api/auth/login", {
+    method: "POST",
+    body: JSON.stringify({ password: "incorrect-password" })
+  });
+  assert.equal(wrongLogin.status, 401);
+
+  const login = await request("/api/auth/login", {
+    method: "POST",
+    body: JSON.stringify({ password: "SkySpy-Admin-First-Run-2026!" })
+  });
+  assert.equal(login.status, 200);
+  assert.ok(login.body.token);
+
+  const unauthenticatedInventory = await request("/api/devices");
+  assert.equal(unauthenticatedInventory.status, 401);
+
+  const installId = randomUUID();
+  const diagnostics = {
+    manufacturer: "Sky Labs",
+    model: "Owner-approved test phone",
+    androidVersion: "Android test",
+    securityPatch: "2026-10-01",
+    batteryPercent: 84,
+    charging: false,
+    appVersion: "0.2.0"
+  };
+
+  const noConsent = await request("/api/device/register", {
+    method: "POST",
+    body: JSON.stringify({ installId, consent: false, device: diagnostics })
+  });
+  assert.equal(noConsent.status, 403);
+
+  const registration = await request("/api/device/register", {
+    method: "POST",
+    body: JSON.stringify({ installId, consent: true, device: diagnostics })
+  });
+  assert.equal(registration.status, 201);
+  assert.ok(registration.body.deviceId);
+  assert.ok(registration.body.deviceToken);
 
   const inventory = await request("/api/devices", {
-    headers: { Authorization: `Bearer ${token}` }
+    headers: { Authorization: "Bearer " + login.body.token }
   });
   assert.equal(inventory.status, 200);
   assert.equal(inventory.body.devices.length, 1);
-  assert.equal(inventory.body.devices[0].model, "Test handset");
+  assert.equal(inventory.body.devices[0].model, diagnostics.model);
   assert.equal(inventory.body.devices[0].status, "online");
   assert.equal("tokenHash" in inventory.body.devices[0], false);
+  assert.equal("installIdHash" in inventory.body.devices[0], false);
+
+  const reRegistration = await request("/api/device/register", {
+    method: "POST",
+    body: JSON.stringify({ installId, consent: true, device: diagnostics })
+  });
+  assert.equal(reRegistration.status, 201);
+  assert.equal(reRegistration.body.deviceId, registration.body.deviceId);
+  assert.notEqual(reRegistration.body.deviceToken, registration.body.deviceToken);
 
   const heartbeat = await request("/api/device/heartbeat", {
     method: "POST",
-    headers: { Authorization: `Bearer ${claim.body.deviceToken}` },
+    headers: { Authorization: "Bearer " + reRegistration.body.deviceToken },
     body: JSON.stringify({ device: { batteryPercent: 80, charging: true } })
   });
   assert.equal(heartbeat.status, 200);
 
-  const reusedCode = await request("/api/pairing/claim", {
-    method: "POST",
-    body: JSON.stringify({
-      code: pairing.body.code,
-      device: { model: "Second handset" }
-    })
-  });
-  assert.equal(reusedCode.status, 400, "pairing codes must be single-use");
-
   const unpair = await request("/api/device/unpair", {
     method: "POST",
-    headers: { Authorization: `Bearer ${claim.body.deviceToken}` },
+    headers: { Authorization: "Bearer " + reRegistration.body.deviceToken },
     body: "{}"
   });
   assert.equal(unpair.status, 200);
 
-  const wrongToken = await request("/api/device/heartbeat", {
-    method: "POST",
-    headers: { Authorization: "Bearer invalid-token" },
-    body: JSON.stringify({ device: {} })
-  });
-  assert.equal(wrongToken.status, 401);
-
   const emptyInventory = await request("/api/devices", {
-    headers: { Authorization: `Bearer ${token}` }
+    headers: { Authorization: "Bearer " + login.body.token }
   });
   assert.equal(emptyInventory.status, 200);
-  assert.equal(emptyInventory.body.devices.length, 0, "unpaired device must leave inventory");
+  assert.equal(emptyInventory.body.devices.length, 0);
 
-  console.log("PASS: operator auth, one-time pairing, inventory, device token isolation, heartbeat, unpair.");
+  const logout = await request("/api/auth/logout", {
+    method: "POST",
+    headers: { Authorization: "Bearer " + login.body.token },
+    body: "{}"
+  });
+  assert.equal(logout.status, 200);
+
+  const afterLogout = await request("/api/devices", {
+    headers: { Authorization: "Bearer " + login.body.token }
+  });
+  assert.equal(afterLogout.status, 401);
+
+  console.log("PASS: default configuration, admin setup/login/logout, consent-gated no-code registration, inventory, token rotation, heartbeat and unpair.");
 } finally {
   child.kill("SIGTERM");
   await rm(dataDir, { recursive: true, force: true });
