@@ -1,3 +1,4 @@
+using System.IO;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
@@ -314,13 +315,13 @@ public sealed class DeviceStore
                 DeviceRecord updated = previous with
                 {
                     Name = DisplayName(deviceName, cleaned.Model),
-                    Manufacturer = cleaned.Manufacturer,
-                    Model = cleaned.Model,
-                    AndroidVersion = cleaned.AndroidVersion,
-                    SecurityPatch = cleaned.SecurityPatch,
+                    Manufacturer = cleaned.Manufacturer ?? "",
+                    Model = cleaned.Model ?? "",
+                    AndroidVersion = cleaned.AndroidVersion ?? "",
+                    SecurityPatch = cleaned.SecurityPatch ?? "",
                     BatteryPercent = cleaned.BatteryPercent,
                     Charging = cleaned.Charging,
-                    AppVersion = cleaned.AppVersion,
+                    AppVersion = cleaned.AppVersion ?? "",
                     TokenHash = Hash(token),
                     LastSeenAt = now
                 };
@@ -335,13 +336,13 @@ public sealed class DeviceStore
                 InstallIdHash = installHash,
                 TokenHash = Hash(token),
                 Name = DisplayName(deviceName, cleaned.Model),
-                Manufacturer = cleaned.Manufacturer,
-                Model = cleaned.Model,
-                AndroidVersion = cleaned.AndroidVersion,
-                SecurityPatch = cleaned.SecurityPatch,
+                Manufacturer = cleaned.Manufacturer ?? "",
+                Model = cleaned.Model ?? "",
+                AndroidVersion = cleaned.AndroidVersion ?? "",
+                SecurityPatch = cleaned.SecurityPatch ?? "",
                 BatteryPercent = cleaned.BatteryPercent,
                 Charging = cleaned.Charging,
-                AppVersion = cleaned.AppVersion,
+                AppVersion = cleaned.AppVersion ?? "",
                 CreatedAt = now,
                 LastSeenAt = now
             };
@@ -453,10 +454,10 @@ public sealed class DeviceStore
     private static string NonEmpty(string? candidate, string fallback) =>
         string.IsNullOrWhiteSpace(candidate) ? fallback : candidate;
 
-    private static string DisplayName(string? preferred, string model)
+    private static string DisplayName(string? preferred, string? model)
     {
         string cleaned = CleanText(preferred, 60);
-        return cleaned.Length > 0 ? cleaned : model;
+        return cleaned.Length > 0 ? cleaned : (model ?? "Android device");
     }
 
     private static string Hash(string value) =>
