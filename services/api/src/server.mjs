@@ -159,7 +159,7 @@ function rateLimited(key, limit, windowMs) {
 
 function isLoopback(request) {
   const address = request.socket.remoteAddress ?? "";
-  const hostHeader = (request.headers.host ?? "").split(":")[0].replace(/^\\[|\\]$/g, "");
+  const hostHeader = (request.headers.host ?? "").split(":")[0].replace(/^\[|\]$/g, "");
   return (address === "127.0.0.1" || address === "::1" || address === "::ffff:127.0.0.1")
     && (hostHeader === "localhost" || hostHeader === "127.0.0.1" || hostHeader === "::1");
 }
@@ -338,7 +338,7 @@ async function handle(request, response) {
     return;
   }
 
-  const detail = /^\\/api\\/devices\\/([0-9a-f-]{36})$/.exec(route);
+  const detail = /^\/api\/devices\/([0-9a-f-]{36})$/.exec(route);
   if (request.method === "GET" && detail) {
     if (!requireOperator(request, response)) return;
     const device = devices.find((item) => item.id === detail[1]);
