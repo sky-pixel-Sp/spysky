@@ -5,7 +5,7 @@ SkySpy LAN is a **consent-based remote device management** project with two sepa
 1. **SkySpy Control** — an installable web dashboard (PWA) for the operator.
 2. **SkySpy Companion** — an Android application that the device owner installs and chooses to connect.
 
-A small API service handles first-run admin setup, authentication, device registration, and heartbeats. Device registration does not require a pairing code: the owner reviews the diagnostics notice and taps **Connect this device** in Companion.
+A small API service handles first-run admin setup, operator sessions, owner-approved device registration, and device heartbeats. Device registration does not require a pairing code. The owner completes a one-time enrollment in Companion; subsequent app launches reuse the saved device identity and reconnect automatically.
 
 ## Project layout
 
@@ -65,11 +65,11 @@ The admin password is salted and hashed by the API. Control receives a short-liv
 4. Tap **Connect this device**.
 5. The registered device appears automatically in Control. The dashboard refreshes its list every six seconds.
 
-The Companion does not request an operator password, pairing code, or broad Android permissions. It shares only manufacturer/model, Android version/security patch, battery/charging state, app version, and heartbeat time. The heartbeat runs only while the Companion screen is open in this milestone.
+The Companion does not request an operator password, pairing code, or broad Android permissions. It shares only manufacturer/model, Android version/security patch, battery/charging state, app version, and heartbeat time. After enrollment, Companion starts a visible Android foreground service and sends a heartbeat every 30 seconds while that service is running. Reopening the app starts the service again automatically. Android may still stop apps because of force-stop actions, battery-management policies, or device-vendor restrictions; the app does not hide its background operation.
 
 If Companion is installed on a different network, use an HTTPS API address. Plain HTTP is intentionally blocked by the app for public addresses.
 
-## Build locally
+## Automatic reconnection and background operation\n\nThe first connection is owner-approved and requires the SkySpy server address once. Companion then saves the server address, installation ID, device ID, and device-specific credential in its private app storage. On later launches, it starts the visible `AutoConnectService` automatically and reuses that device identity; no repeated pairing code or Companion-side operator login is needed. A persistent Android notification identifies the running connection service. The owner can remove the enrollment from inside Companion.\n\nThe API still validates the per-device credential on heartbeat requests, and SkySpy Control retains its operator sign-in. This prevents an unauthenticated client from impersonating an enrolled phone or reading the device inventory.\n\nAndroid controls background execution. The service is started while Companion is visible and remains active after the activity is closed when Android permits it. Force-stop, uninstall, vendor battery managers, or system restrictions can interrupt it; opening Companion starts reconnection again. This is not a stealth service and it does not start itself invisibly at boot.\n\n## Build locally
 
 ### Control dashboard
 
@@ -106,7 +106,7 @@ A successful run uploads separate artifacts named `skyspy-control-web`, `skyspy-
 - [x] Separate Control dashboard and Android Companion
 - [x] Default API configuration without environment variables
 - [x] First-run admin password setup and login
-- [x] Owner-approved device registration without pairing codes
+- [x] One-time owner-approved device registration without pairing codes\n- [x] Automatic reconnect on app launch using the saved device identity\n- [x] Visible connected-device foreground service and 30-second heartbeats
 - [x] Device inventory, details, online/offline status, heartbeat, and owner unpair
 - [x] LAN address support; HTTPS required for public internet endpoints
 - [ ] WebRTC P2P screen sharing with per-session Android MediaProjection consent
