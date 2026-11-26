@@ -188,8 +188,11 @@ function sessionFor(request) {
 }
 
 function requireOperator(request, response) {
+  // The dashboard may run without an operator password only on the server
+  // computer itself. Requests arriving over the LAN still require a session.
+  if (isLoopback(request)) return true;
   if (!sessionFor(request)) {
-    sendJson(response, 401, { error: "Sign in to SkySpy Control first." });
+    sendJson(response, 401, { error: "Sign in to SkySpy Control first, or open it locally on the server computer." });
     return false;
   }
   return true;
@@ -265,12 +268,12 @@ async function handle(request, response) {
   const address = request.socket.remoteAddress ?? "unknown";
 
   if (request.method === "GET" && route === "/health") {
-    sendJson(response, 200, { ok: true, service: "skyspy-api", version: "0.2.0" });
+    sendJson(response, 200, { ok: true, service: "skyspy-api", version: "0.2.2" });
     return;
   }
 
   if (request.method === "GET" && route === "/api/auth/status") {
-    sendJson(response, 200, { configured: Boolean(adminAuth) });
+    sendJson(response, 200, { configured: Boolean(adminAuth), localAccess: isLoopback(request) });
     return;
   }
 
