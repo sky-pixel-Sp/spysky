@@ -1,11 +1,14 @@
 package id.skyspy.companion
 
+import android.Manifest
 import android.app.Activity
+import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Color
+import android.os.Build
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
 import android.view.Gravity
+import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.CheckBox
@@ -17,38 +20,25 @@ import org.json.JSONObject
 import java.util.UUID
 
 class MainActivity : Activity() {
-    private val preferences by lazy { getSharedPreferences("skyspy_companion", MODE_PRIVATE) }
-    private val handler = Handler(Looper.getMainLooper())
+    private val preferences by lazy { getSharedPreferences(PREFS_NAME, MODE_PRIVATE) }
     private lateinit var serverInput: EditText
     private lateinit var consentCheck: CheckBox
     private lateinit var statusText: TextView
     private lateinit var registeredText: TextView
     private lateinit var connectButton: Button
-
-    private val heartbeatTask = object : Runnable {
-        override fun run() {
-            sendHeartbeat()
-            handler.postDelayed(this, HEARTBEAT_INTERVAL_MS)
-        }
-    }
+    private lateinit var setupSection: LinearLayout
+    private lateinit var registeredSection: LinearLayout
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         buildScreen()
         renderRegistrationState()
+        requestNotificationPermissionOnce()
     }
 
     override fun onResume() {
         super.onResume()
-        if (preferences.getString(KEY_DEVICE_TOKEN, null) != null) {
-            handler.removeCallbacks(heartbeatTask)
-            handler.post(heartbeatTask)
-        }
-    }
-
-    override fun onPause() {
-        handler.removeCallbacks(heartbeatTask)
-        super.onPause()
+        startAutoConnectIfEnrolled()
     }
 
     private fun buildScreen() {
@@ -71,10 +61,10 @@ class MainActivity : Activity() {
             letterSpacing = 0.14f
         })
 
-        content.addView(text("Connect your device.", 27f, Color.WHITE, true), params(top = 18))
+        content.addView(text("Automatic device connection", 26f, Color.WHITE, true), params(top = 18))
         content.addView(
             text(
-                "Your device appears in SkySpy Control only after you choose to connect and approve sharing the diagnostics below.",
+                "After the device owner approves the first connection, SkySpy reconnects automatically whenever Companion is opened. A visible Android notification indicates that the connection service is running.",
                 14f,
                 Color.rgb(155, 169, 190),
                 false
@@ -104,38 +94,48 @@ class MainActivity : Activity() {
         )
         content.addView(consentCard, params(top = 25))
 
-        content.addView(text("SKYSPY SERVER ADDRESS", 10f, Color.rgb(130, 148, 173), true), params(top = 25))
-        serverInput = editText("http://192.168.1.10:8787")
+        setupSection = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+        setupSection.addView(text("ONE-TIME CONNECTION SETUP", 10f, Color.rgb(130, 148, 173), true), params(top = 25))
+        serverInput = editText("https://your-control-server.example")
         serverInput.setText(preferences.getString(KEY_SERVER_URL, ""))
-        content.addView(serverInput, params(top = 8))
+        setupSection.addView(text("SkySpy server address", 12f, Color.rgb(155, 169, 190), false), params(top = 10))
+        setupSection.addView(serverInput, params(top = 6))
 
         consentCheck = CheckBox(this).apply {
-            text = "I understand and agree to share only the diagnostics listed above with this SkySpy server."
+            text = "I own or administer this device and agree to share only the diagnostics listed above with this SkySpy server."
             setTextColor(Color.rgb(201, 215, 233))
             textSize = 12f
             buttonTintList = android.content.res.ColorStateList.valueOf(Color.rgb(111, 157, 255))
             setPadding(0, dp(8), 0, dp(8))
         }
-        content.addView(consentCheck, params(top = 16))
+        setupSection.addView(consentCheck, params(top = 14))
 
-        connectButton = button("Connect this device")
+        connectButton = button("Approve and connect once")
         connectButton.isEnabled = false
         connectButton.setOnClickListener { registerDevice() }
-        content.addView(connectButton, params(top = 12))
+        setupSection.addView(connectButton, params(top = 10))
+        content.addView(setupSection)
 
-        registeredText = text("", 12f, Color.rgb(160, 190, 235), false)
-        content.addView(registeredText, params(top = 18))
+        registeredSection = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = View.GONE
+        }
+        registeredSection.addView(text("AUTOMATIC CONNECTION", 10f, Color.rgb(130, 148, 173), true), params(top = 25))
+        registeredText = text("", 13f, Color.rgb(204, 216, 232), false)
+        registeredSection.addView(registeredText, params(top = 8))
+        val removeButton = button("Remove this device from Control")
+        removeButton.setBackgroundColor(Color.rgb(64, 73, 88))
+        removeButton.setOnClickListener { unpairDevice() }
+        registeredSection.addView(removeButton, params(top = 16))
+        content.addView(registeredSection)
 
-        val unpairButton = button("Disconnect and remove device")
-        unpairButton.setBackgroundColor(Color.rgb(46, 56, 71))
-        unpairButton.setOnClickListener { unpairDevice() }
-        content.addView(unpairButton, params(top = 12))
-
-        statusText = text("Not connected", 12f, Color.rgb(151, 165, 185), false)
+        statusText = text("Waiting for first-time setup.", 12f, Color.rgb(151, 165, 185), false)
         content.addView(statusText, params(top = 22))
         content.addView(
             text(
-                "The app sends a heartbeat while this screen is open. Disconnect here or uninstall Companion at any time. No pairing code or operator password is required on this device.",
+                "Once approved, the saved device identity is used for automatic reconnection. The connection remains visible through Android's foreground-service notification. The owner can remove this device from the panel here.",
                 11f,
                 Color.rgb(107, 122, 143),
                 false
@@ -163,12 +163,12 @@ class MainActivity : Activity() {
             return
         }
         if (!consentCheck.isChecked) {
-            statusText.text = "Approve the diagnostics sharing notice before connecting."
+            statusText.text = "Approve the diagnostics notice before connecting."
             return
         }
 
         connectButton.isEnabled = false
-        statusText.text = "Connecting this device to SkySpy Control…"
+        statusText.text = "Registering this owner-approved device…"
         Thread {
             try {
                 val info = DeviceInfo.collect(this)
@@ -186,13 +186,13 @@ class MainActivity : Activity() {
                     .putString(KEY_SERVER_URL, baseUrl)
                     .putString(KEY_DEVICE_ID, deviceId)
                     .putString(KEY_DEVICE_TOKEN, deviceToken)
+                    .putBoolean(KEY_OWNER_APPROVED, true)
                     .apply()
+
                 runOnUiThread {
                     renderRegistrationState()
-                    statusText.text = "Connected. This device should now appear in SkySpy Control."
-                    handler.removeCallbacks(heartbeatTask)
-                    handler.post(heartbeatTask)
-                    consentCheck.isChecked = false
+                    startAutoConnectIfEnrolled()
+                    statusText.text = "Approved. Automatic connection is now active."
                 }
             } catch (error: Exception) {
                 runOnUiThread {
@@ -203,22 +203,31 @@ class MainActivity : Activity() {
         }.start()
     }
 
-    private fun sendHeartbeat() {
-        val baseUrl = preferences.getString(KEY_SERVER_URL, null) ?: return
-        val token = preferences.getString(KEY_DEVICE_TOKEN, null) ?: return
-        Thread {
-            try {
-                ApiClient.postJson(
-                    baseUrl,
-                    "/api/device/heartbeat",
-                    JSONObject().put("device", DeviceInfo.collect(this).toJson()),
-                    token
-                )
-                runOnUiThread { statusText.text = "Connected · heartbeat sent just now" }
-            } catch (error: Exception) {
-                runOnUiThread { statusText.text = "Connection issue: ${error.message ?: "Server unavailable"}" }
+    private fun startAutoConnectIfEnrolled() {
+        val server = preferences.getString(KEY_SERVER_URL, null)
+        val token = preferences.getString(KEY_DEVICE_TOKEN, null)
+        val approved = preferences.getBoolean(KEY_OWNER_APPROVED, false)
+        if (!approved || server.isNullOrBlank() || token.isNullOrBlank()) return
+
+        val serviceIntent = Intent(this, AutoConnectService::class.java)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(serviceIntent)
+            } else {
+                startService(serviceIntent)
             }
-        }.start()
+            statusText.text = "Automatic connection service is active."
+        } catch (error: Exception) {
+            statusText.text = "Could not start the visible connection service: ${error.message ?: "Android restricted startup"}"
+        }
+    }
+
+    private fun requestNotificationPermissionOnce() {
+        if (Build.VERSION.SDK_INT < 33) return
+        if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) return
+        if (preferences.getBoolean(KEY_NOTIFICATION_REQUESTED, false)) return
+        preferences.edit().putBoolean(KEY_NOTIFICATION_REQUESTED, true).apply()
+        requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), NOTIFICATION_PERMISSION_REQUEST)
     }
 
     private fun unpairDevice() {
@@ -237,15 +246,16 @@ class MainActivity : Activity() {
                     .remove(KEY_SERVER_URL)
                     .remove(KEY_DEVICE_ID)
                     .remove(KEY_DEVICE_TOKEN)
+                    .remove(KEY_OWNER_APPROVED)
                     .apply()
                 runOnUiThread {
-                    handler.removeCallbacks(heartbeatTask)
+                    stopService(Intent(this, AutoConnectService::class.java))
                     renderRegistrationState()
-                    statusText.text = "Disconnected. This device was removed from Control."
+                    statusText.text = "Device removed from Control."
                 }
             } catch (error: Exception) {
                 runOnUiThread {
-                    statusText.text = "Disconnect could not be confirmed: ${error.message ?: "Server unavailable"}"
+                    statusText.text = "Removal could not be confirmed: ${error.message ?: "Server unavailable"}"
                 }
             }
         }.start()
@@ -254,11 +264,18 @@ class MainActivity : Activity() {
     private fun renderRegistrationState() {
         val deviceId = preferences.getString(KEY_DEVICE_ID, null)
         val server = preferences.getString(KEY_SERVER_URL, null)
-        registeredText.text = if (deviceId.isNullOrBlank()) {
-            "This device is not connected to a Control panel."
+        val token = preferences.getString(KEY_DEVICE_TOKEN, null)
+        val approved = preferences.getBoolean(KEY_OWNER_APPROVED, false)
+        val enrolled = approved && !deviceId.isNullOrBlank() && !server.isNullOrBlank() && !token.isNullOrBlank()
+
+        setupSection.visibility = if (enrolled) View.GONE else View.VISIBLE
+        registeredSection.visibility = if (enrolled) View.VISIBLE else View.GONE
+        registeredText.text = if (enrolled) {
+            "Device ID: ${deviceId}\nServer: ${server}\nReconnect mode: automatic"
         } else {
-            "Connected device ID: " + deviceId + "\nServer: " + server
+            ""
         }
+        if (!enrolled) statusText.text = "Waiting for first-time owner approval."
     }
 
     private fun card(): LinearLayout = LinearLayout(this).apply {
@@ -307,10 +324,13 @@ class MainActivity : Activity() {
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
     companion object {
+        private const val PREFS_NAME = "skyspy_companion"
         private const val KEY_SERVER_URL = "server_url"
         private const val KEY_DEVICE_ID = "device_id"
         private const val KEY_DEVICE_TOKEN = "device_token"
         private const val KEY_INSTALL_ID = "install_id"
-        private const val HEARTBEAT_INTERVAL_MS = 30_000L
+        private const val KEY_OWNER_APPROVED = "owner_approved"
+        private const val KEY_NOTIFICATION_REQUESTED = "notification_requested"
+        private const val NOTIFICATION_PERMISSION_REQUEST = 4102
     }
 }
