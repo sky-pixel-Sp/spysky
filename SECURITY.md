@@ -2,26 +2,30 @@
 
 ## Supported use
 
-SkySpy LAN is for devices owned by the operator or devices whose owner knowingly installs the Companion and chooses to connect. Do not use it to monitor a person without informed consent.
+SkySpy is for an Android phone owned by the operator and Android devices whose owners knowingly install SkySpy Companion and explicitly approve the diagnostics connection. Do not use it to monitor anyone without informed consent.
 
-## Current safeguards
+## Android-only architecture
 
-- SkySpy Control is a native Windows WPF application. There is no website, browser dashboard, PWA, embedded browser, or static web content.
-- The local API runs inside the visible desktop application process and stops when that application closes.
-- The embedded API binds only to loopback and detected private IPv4 interfaces.
-- Browser-origin requests are rejected; no CORS access is enabled.
-- The API exposes no network endpoint for reading the device inventory. The desktop UI reads the local data store directly.
-- Companion registration requires explicit owner approval and a stable per-installation UUID.
-- Companion heartbeats and unpair requests require the enrolled device's unique credential.
-- Device credentials are random and only SHA-256 digests are stored by the Windows app.
-- Re-registering the same installation rotates its device credential without creating a duplicate inventory record.
-- API request bodies and metadata fields are size-limited and allow-listed.
-- Companion requests only the permissions required for its visible diagnostics and network connection.
-- Plain HTTP is intended only for localhost and private IPv4 LAN connections.
+- **SkySpy Controller** is a native Android app. It hosts the private-LAN API in a visible Android foreground service.
+- **SkySpy Companion** is a separate native Android app installed and approved by the managed-device owner.
+- The project has no Windows panel, website, browser dashboard, PWA, embedded browser, or Node.js sidecar.
+- The Controller API uses port 8787, rejects browser-origin requests, accepts only loopback/private IPv4 clients, and does not expose a remote inventory endpoint.
+- Companion registration requires an explicit owner consent flag and a valid installation UUID.
+- Heartbeats and unpair requests require a per-installation random device token. The Controller stores only the token's SHA-256 digest.
+- Re-registering the same installation rotates its device token without creating a duplicate record.
+- Request bodies are size-limited, metadata fields are allow-listed, and device text is sanitized.
+- The Companion retains a launcher icon and uses a visible foreground-service notification for its connection loop.
+- Current diagnostics need no camera, microphone, location, contacts, SMS, call-log, notification-listener, accessibility, or storage permissions.
 
-## Not implemented
+## Current feature boundaries
 
-There is no remote shell, SMS/OTP access, contacts access, notification capture, keylogging, credential collection, hidden recording, stealth persistence, silent installation, anti-uninstall, or security-control bypass. The current milestone does not implement screen streaming, remote UI control, or P2P tunnelling.
+The current build supports diagnostics, heartbeat/online status, and revoking a device enrollment. It does **not** implement remote screen streaming, remote touch injection, file browsing, camera/microphone access, arbitrary remote commands, P2P tunnelling, or covert operation. Any future screen-support feature must use Android's system MediaProjection consent flow for each session and remain visible on the Companion device.
+
+There is no SMS/OTP access, contacts harvesting, notification capture, keylogging, credential collection, hidden recording, stealth persistence, anti-uninstall, silent installation, phishing overlay, remote shell, or Android security-control bypass.
+
+## Network warning
+
+Plain HTTP is intended only for localhost and trusted private IPv4 LAN connections. Do not port-forward the Controller or expose port 8787 to the public internet. A production deployment outside a trusted LAN would need a separately reviewed TLS and authentication design.
 
 ## Reporting
 
