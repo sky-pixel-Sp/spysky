@@ -285,6 +285,18 @@ async function route(request, response) {
     return;
   }
 
+  if (request.method === "POST" && pathname === "/api/device/unpair") {
+    const device = getDeviceByToken(bearerToken(request));
+    if (!device) {
+      sendJson(response, 401, { error: "Device authentication failed. Pair this Companion again." });
+      return;
+    }
+    devices = devices.filter((item) => item.id !== device.id);
+    await persistDevices();
+    sendJson(response, 200, { ok: true, message: "Device unpaired and removed from inventory." });
+    return;
+  }
+
   if (request.method === "POST" && pathname === "/api/device/heartbeat") {
     const device = getDeviceByToken(bearerToken(request));
     if (!device) {
