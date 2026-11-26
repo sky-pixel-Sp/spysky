@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
 namespace SkySpy.Control;
 
@@ -234,7 +235,7 @@ public sealed class DeviceStore
                 DeviceRecord previous = _devices[index];
                 DeviceRecord updated = previous with
                 {
-                    Name = CleanText(deviceName, 60) is string preferred && preferred.Length > 0 ? preferred : cleaned.Model,
+                    Name = DisplayName(deviceName, cleaned.Model),
                     Manufacturer = cleaned.Manufacturer,
                     Model = cleaned.Model,
                     AndroidVersion = cleaned.AndroidVersion,
@@ -255,7 +256,7 @@ public sealed class DeviceStore
                 Id = Guid.NewGuid().ToString("D"),
                 InstallIdHash = installHash,
                 TokenHash = Hash(token),
-                Name = CleanText(deviceName, 60) is string displayName && displayName.Length > 0 ? displayName : cleaned.Model,
+                Name = DisplayName(deviceName, cleaned.Model),
                 Manufacturer = cleaned.Manufacturer,
                 Model = cleaned.Model,
                 AndroidVersion = cleaned.AndroidVersion,
@@ -374,6 +375,12 @@ public sealed class DeviceStore
     private static string NonEmpty(string? candidate, string fallback) =>
         string.IsNullOrWhiteSpace(candidate) ? fallback : candidate;
 
+    private static string DisplayName(string? preferred, string model)
+    {
+        string cleaned = CleanText(preferred, 60);
+        return cleaned.Length > 0 ? cleaned : model;
+    }
+
     private static string Hash(string value) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
 
@@ -416,7 +423,7 @@ public sealed class DeviceMetadata
     public string? AppVersion { get; set; }
 }
 
-public sealed class DeviceRecord
+public sealed record DeviceRecord
 {
     public string Id { get; init; } = "";
     public string InstallIdHash { get; init; } = "";
