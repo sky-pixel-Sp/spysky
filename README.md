@@ -1,88 +1,79 @@
-# SkySpy LAN 0.3.0
+# SkySpy Android 0.4.0
 
-SkySpy is a consent-based device diagnostics system delivered as two installable applications. It does not use a website, browser dashboard, or PWA.
+SkySpy is a transparent, consent-based Android-to-Android device diagnostics and support project. Both the operator panel and the managed-device companion are native Android applications. There is no Windows panel, website, browser dashboard, PWA, or Node.js sidecar.
 
-## Applications
+## Android applications
 
-1. **SkySpy Control for Windows** — native C# / WPF desktop application, distributed as a self-contained Windows x64 executable.
-2. **SkySpy Companion for Android** — Kotlin Android application installed and approved by the device owner.
+1. **SkySpy Controller** — installed on the owner's Android phone. It hosts the local LAN API, displays enrolled devices, shows diagnostic status, and can revoke an enrollment.
+2. **SkySpy Companion** — installed on the Android phone being managed. Its owner reviews the diagnostics notice and approves the first connection.
 
-The Windows application hosts the local API inside its own process, displays devices enrolled by their owners, and refreshes the inventory every six seconds. There is no separate Node.js process, web server, browser window, WebView, or website.
+## Quick setup
 
-## Windows application
+1. Install **SkySpy Controller** on the owner/operator Android phone.
+2. Connect both Android phones to the same trusted private Wi-Fi network.
+3. Open Controller and tap **Start local panel**. Keep its visible foreground-service notification active while devices are connected.
+4. Copy the private-LAN address shown in Controller, such as `http://192.168.1.10:8787`.
+5. Open Companion on the other phone, enter the address, read the diagnostics list, and explicitly approve the connection.
+6. The device appears in Controller. Companion uses its saved device-specific session token for later heartbeats. The owner can remove the enrollment in Companion; the Controller operator can revoke it from the panel.
 
-Download the `skyspy-control-windows-x64` GitHub Actions artifact and extract it. Run `SkySpy.Control.exe`.
+Both devices must remain on the same trusted private LAN. The Controller listens on port `8787` and accepts only private IPv4/loopback clients. It rejects requests containing a browser `Origin` header. The local HTTP endpoint is not designed for public Wi-Fi, port forwarding, or internet exposure.
 
-The executable is published self-contained for Windows x64 and includes the .NET and ASP.NET Core runtime. No Node.js or .NET installation is required on the target PC.
+## Data shared by Companion
 
-Device records are stored under:
+- Manufacturer and model
+- Android version and security patch level
+- Battery percentage and charging state
+- Companion app version
+- Heartbeat time / online status
 
-```text
-%LOCALAPPDATA%\\SkySpy\\data\\devices.json
-```
+The current build does not request camera, microphone, location, contacts, SMS, call-log, notification-listener, accessibility, or storage permissions. Android's notification permission is requested so users can see the foreground-service status; the diagnostics payload itself does not need a dangerous runtime permission.
 
-The local API runs inside the desktop process on port `8787`. It binds only to loopback and private IPv4 network interfaces. The service stops when SkySpy Control closes. Allow the application on a **private network** in Windows Firewall when prompted.
+## What Controller can do in this build
 
-## Connect an Android Companion
+- Show enrolled Android devices and their online/offline status.
+- View approved device model, Android version, battery and last heartbeat.
+- Refresh the device list from the local store.
+- Revoke an enrollment so its stored session token stops working.
 
-1. Start `SkySpy.Control.exe` on the Windows PC.
-2. Connect the PC and Android phone to the same trusted Wi-Fi or private LAN.
-3. In SkySpy Control, copy the displayed Companion address (for example `http://192.168.1.10:8787`).
-4. Open SkySpy Companion on the Android phone and enter the address once.
-5. Review the diagnostics it shares and approve the one-time enrollment.
-6. The Android device appears in the Windows application. Later launches reuse the saved installation identity and reconnect automatically.
-
-The Companion shares only manufacturer/model, Android version/security patch, battery/charging state, app version, and heartbeat time. Its visible Android foreground service sends a heartbeat every 30 seconds while Android allows it to run. Force-stop, vendor battery policies, or system restrictions can interrupt background work; reopening Companion starts reconnection again.
-
-## Access boundaries
-
-- The Windows desktop app reads the inventory directly from its in-process data store. No operator password or browser session is needed on that PC.
-- The embedded API exposes only the Companion registration, heartbeat, unpair, and health routes. It does not expose a remote device-inventory endpoint.
-- Initial device registration requires the owner to explicitly approve the diagnostics notice in Companion.
-- Companion heartbeats and unpair requests require the device-specific credential created during enrollment.
-- The embedded API listens only on loopback and detected private IPv4 interfaces, and rejects browser-origin requests.
-- Plain HTTP is restricted by Companion to localhost/private IPv4 networks. The local desktop API is intended for trusted private LAN use only.
+**This is not full remote touch control.** Remote screen viewing, touch injection, file browsing, camera/microphone access, and arbitrary remote commands are not implemented. A future screen-support feature must be started on the Companion phone and use Android's system MediaProjection consent UI for each session.
 
 ## Build
 
-Requires the .NET 8 SDK on Windows:
+Requires Java 17 and Gradle 8.14.4.
 
-```powershell
-dotnet test apps/control-windows.Tests/SkySpy.Control.Tests.csproj -c Release
-dotnet publish apps/control-windows/SkySpy.Control.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+Build Controller:
+
+```bash
+cd apps/controller
+gradle --no-daemon assembleDebug
 ```
 
-Build the Android Companion by opening `apps/companion` in Android Studio, or run:
+Build Companion:
 
 ```bash
 cd apps/companion
-gradle assembleDebug
+gradle --no-daemon assembleDebug
 ```
+
+The debug APKs are generated at:
+
+- `apps/controller/app/build/outputs/apk/debug/app-debug.apk`
+- `apps/companion/app/build/outputs/apk/debug/app-debug.apk`
 
 ## GitHub Actions
 
-The workflow tests and builds the native Windows desktop application and the Android debug APK. It uploads:
-- `skyspy-control-windows-x64`
-- `skyspy-companion-debug-apk`
+The workflow builds and uploads two separate artifacts:
 
-There is no PWA, static site, website, browser dashboard, or Node.js artifact.
+- `skyspy-controller-android-debug-apk`
+- `skyspy-companion-android-debug-apk`
 
-## Current scope
+CI build success confirms compilation and APK packaging. It does not replace installation and functional testing on physical Android phones.
 
-- [x] Native Windows WPF Control application
-- [x] Embedded ASP.NET Core API running in the desktop process
-- [x] Self-contained Windows x64 executable
-- [x] Automatic local API startup and shutdown with the desktop app
-- [x] Local inventory with online/offline status, battery, Android version, and last heartbeat
-- [x] Copyable private-LAN connection address
-- [x] One-time owner-approved registration without pairing codes
-- [x] Companion reconnects using its saved installation identity
-- [x] Visible Companion foreground service and 30-second heartbeat
-- [x] No website, web app, PWA, embedded browser, or web dashboard
-- [ ] WebRTC screen sharing with per-session Android MediaProjection consent
-- [ ] Consent-based file transfer using Android's system file picker
-- [ ] Production TLS deployment for use beyond a private LAN
+## Security and consent
 
-## Consent and safety
-
-The Companion remains visible, has a launcher icon, and describes the diagnostics it shares. The owner can unpair from inside Companion. SkySpy does not include SMS/OTP access, contacts access, notification capture, keylogging, credential collection, hidden recording, phishing overlays, silent installation, stealth persistence, remote shell, or Android security-control bypass.
+- The Companion app keeps a launcher icon and shows an ongoing foreground-service notification while connected.
+- Initial enrollment requires the Companion user to affirm the diagnostics consent notice.
+- Later heartbeats and unpair calls require the device-specific token issued at enrollment.
+- Controller's API is intended for private LAN only and does not expose an internet-facing service.
+- The device owner can unpair from Companion; the Controller operator can revoke the enrollment.
+- SkySpy does not include stealth persistence, hidden capture, SMS/OTP collection, contacts harvesting, notification capture, keylogging, credential collection, phishing overlays, silent installation, remote shell, or Android security-control bypass.
