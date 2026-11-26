@@ -33,7 +33,7 @@ function safeEqual(left, right) {
 }
 
 function bearerToken(request) {
-  const match = /^Bearer\\s+(.+)$/i.exec(request.headers.authorization ?? "");
+  const match = /^Bearer\s+(.+)$/i.exec(request.headers.authorization ?? "");
   return match?.[1] ?? "";
 }
 
@@ -108,7 +108,7 @@ async function readBody(request) {
 
 function cleanText(value, maxLength = 80) {
   if (typeof value !== "string") return "";
-  return value.trim().replace(/[\\u0000-\\u001f\\u007f]/g, "").slice(0, maxLength);
+  return value.trim().replace(/[\u0000-\u001f\u007f]/g, "").slice(0, maxLength);
 }
 
 function cleanMetadata(input = {}) {
