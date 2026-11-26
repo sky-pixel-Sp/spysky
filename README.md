@@ -45,17 +45,23 @@ The API package includes the compiled Control PWA in `services/api/public` and s
 
 The API listens on port 8787 on the host's network interfaces. Keep it on a trusted LAN during local use. For internet access, place it behind an HTTPS reverse proxy or deploy it with HTTPS; do not expose the plain HTTP API directly to the public internet.
 
-## First-time Control setup
+## Control access modes
 
 1. Start the API + Control package on the computer that will host SkySpy.
-2. Open `http://localhost:8787` on that same computer.
-3. Create an admin password of at least 12 characters. Initial admin creation is restricted to a loopback request from the server computer.
-4. Sign in with that password.
-5. On another computer or phone on the same LAN, open `http://<server-lan-ip>:8787` and sign in with the admin password.
+2. Open `http://localhost:8787` or `http://127.0.0.1:8787` on that same computer.
+3. SkySpy Control opens directly in **Personal Local Mode**. No operator password or browser session is required on the server computer.
+4. The password-free inventory and device-detail routes are restricted to requests whose TCP peer and Host header both resolve to loopback. Opening the dashboard through the computer's LAN IP does not activate this mode.
+5. Other computers and phones that open `http://<server-lan-ip>:8787` must sign in. Remote access uses the existing admin session and should use HTTPS outside a trusted private LAN.
 
-The Control UI uses the current server origin automatically, so LAN clients do not need to edit an API URL. The admin password is salted and hashed by the API. Control receives a short-lived session token after login; the operator does not need to manage or paste an API token. Sessions last up to 12 hours and are cleared when the API restarts.
+To enable remote Control sign-in, create the admin account once from PowerShell on the server computer. The password is requested interactively and is not embedded in the command:
 
-The admin password is salted and hashed by the API. Control receives a short-lived session token after login; the operator does not need to manage or paste an API token. Sessions last up to 12 hours and are cleared when the API restarts.
+```powershell
+$password = Read-Host "Create a SkySpy admin password (12+ characters)"
+$body = @{ password = $password } | ConvertTo-Json -Compress
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8787/api/auth/setup" -ContentType "application/json" -Body $body
+```
+
+The admin password is salted and hashed by the API. Remote browser sessions use short-lived tokens held in memory and are cleared when the API restarts. Personal Local Mode does not create an admin account automatically.
 
 ## Connect a Companion device — no pairing code
 
@@ -65,7 +71,7 @@ The admin password is salted and hashed by the API. Control receives a short-liv
 4. Tap **Connect this device**.
 5. The registered device appears automatically in Control. The dashboard refreshes its list every six seconds.
 
-The Companion does not request an operator password, pairing code, or broad Android permissions. It shares only manufacturer/model, Android version/security patch, battery/charging state, app version, and heartbeat time. After enrollment, Companion starts a visible Android foreground service and sends a heartbeat every 30 seconds while that service is running. Reopening the app starts the service again automatically. Android may still stop apps because of force-stop actions, battery-management policies, or device-vendor restrictions; the app does not hide its background operation.
+The Companion does not request an operator password or pairing code, and does not request broad Android permissions. It shares only manufacturer/model, Android version/security patch, battery/charging state, app version, and heartbeat time. After enrollment, Companion starts a visible Android foreground service and sends a heartbeat every 30 seconds while that service is running. Reopening the app starts the service again automatically. Android may still stop apps because of force-stop actions, battery-management policies, or device-vendor restrictions; the app does not hide its background operation.
 
 If Companion is installed on a different network, use an HTTPS API address. Plain HTTP is intentionally blocked by the app for public addresses.
 
@@ -105,7 +111,8 @@ A successful run uploads separate artifacts named `skyspy-control-web`, `skyspy-
 
 - [x] Separate Control dashboard and Android Companion
 - [x] Default API configuration without environment variables
-- [x] First-run admin password setup and login
+- [x] Password-free Personal Local Mode on the server computer only
+- [x] Optional admin password and authenticated Control access for LAN clients
 - [x] One-time owner-approved device registration without pairing codes\n- [x] Automatic reconnect on app launch using the saved device identity\n- [x] Visible connected-device foreground service and 30-second heartbeats
 - [x] Device inventory, details, online/offline status, heartbeat, and owner unpair
 - [x] LAN address support; HTTPS required for public internet endpoints
