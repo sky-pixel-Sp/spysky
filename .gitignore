@@ -11,3 +11,5 @@ local.properties
 !*.env.example
 services/api/data/
 *.apk
+
+data/
