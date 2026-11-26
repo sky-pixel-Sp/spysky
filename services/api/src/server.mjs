@@ -1,32 +1,26 @@
 import http from "node:http";
 import path from "node:path";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import {
-  createHash,
-  randomBytes,
-  randomInt,
-  randomUUID,
-  timingSafeEqual,
-} from "node:crypto";
+import { createHash, randomBytes, randomUUID, scryptSync, timingSafeEqual } from "node:crypto";
 
-const PORT = Number.parseInt(process.env.SKYSPY_PORT ?? "8787", 10);
-const DATA_DIR = path.resolve(process.env.SKYSPY_DATA_DIR ?? "./data");
+function option(flag, fallback) {
+  const index = process.argv.indexOf(flag);
+  return index >= 0 && process.argv[index + 1] ? process.argv[index + 1] : fallback;
+}
+
+const PORT = Number(option("--port", "8787"));
+const DATA_DIR = path.resolve(option("--data-dir", "./data"));
 const DATA_FILE = path.join(DATA_DIR, "devices.json");
-const ADMIN_TOKEN = process.env.SKYSPY_ADMIN_TOKEN ?? "";
-const ALLOWED_ORIGIN = process.env.SKYSPY_ALLOWED_ORIGIN ?? "http://localhost:5173";
-const PAIRING_TTL_MS = 3 * 60 * 1000;
+const AUTH_FILE = path.join(DATA_DIR, "admin-auth.json");
+const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 const ONLINE_WINDOW_MS = 90 * 1000;
 const MAX_BODY_BYTES = 16 * 1024;
+const sessions = new Map();
+const rateLimits = new Map();
 
 if (!Number.isInteger(PORT) || PORT < 1 || PORT > 65535) {
-  throw new Error("SKYSPY_PORT must be a valid TCP port.");
+  throw new Error("Port must be a valid TCP port.");
 }
-if (ADMIN_TOKEN.length < 32) {
-  throw new Error("SKYSPY_ADMIN_TOKEN must contain at least 32 characters.");
-}
-
-const pairingCodes = new Map();
-const claimAttempts = new Map();
 
 function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
@@ -39,8 +33,7 @@ function safeEqual(left, right) {
 }
 
 function bearerToken(request) {
-  const header = request.headers.authorization ?? "";
-  const match = /^Bearer\s+(.+)$/i.exec(header);
+  const match = /^Bearer\\s+(.+)$/i.exec(request.headers.authorization ?? "");
   return match?.[1] ?? "";
 }
 
@@ -56,18 +49,38 @@ function sendJson(response, status, body) {
   response.end(payload);
 }
 
+function isPrivateHost(host) {
+  if (host === "localhost" || host === "127.0.0.1" || host === "::1") return true;
+  const parts = host.split(".");
+  if (parts.length !== 4) return false;
+  const octets = parts.map(Number);
+  if (octets.some((value) => !Number.isInteger(value) || value < 0 || value > 255)) return false;
+  return octets[0] === 10
+    || octets[0] === 127
+    || (octets[0] === 192 && octets[1] === 168)
+    || (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31);
+}
+
 function setCors(request, response) {
   const origin = request.headers.origin;
-  if (origin && origin !== ALLOWED_ORIGIN) {
-    sendJson(response, 403, { error: "Origin is not allowed." });
+  if (!origin) return true;
+  let parsed;
+  try {
+    parsed = new URL(origin);
+  } catch {
+    sendJson(response, 403, { error: "Invalid browser origin." });
     return false;
   }
-  if (origin) {
-    response.setHeader("Access-Control-Allow-Origin", ALLOWED_ORIGIN);
-    response.setHeader("Vary", "Origin");
-    response.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type");
-    response.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  const allowed = parsed.protocol === "https:"
+    || (parsed.protocol === "http:" && isPrivateHost(parsed.hostname));
+  if (!allowed) {
+    sendJson(response, 403, { error: "Use HTTPS or a trusted local network." });
+    return false;
   }
+  response.setHeader("Access-Control-Allow-Origin", origin);
+  response.setHeader("Vary", "Origin");
+  response.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type");
+  response.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   return true;
 }
 
@@ -95,108 +108,102 @@ async function readBody(request) {
 
 function cleanText(value, maxLength = 80) {
   if (typeof value !== "string") return "";
-  return value.trim().replace(/[\u0000-\u001f\u007f]/g, "").slice(0, maxLength);
+  return value.trim().replace(/[\\u0000-\\u001f\\u007f]/g, "").slice(0, maxLength);
 }
 
-function cleanBattery(value) {
-  if (typeof value !== "number" || !Number.isFinite(value)) return null;
-  return Math.max(0, Math.min(100, Math.round(value)));
-}
-
-function cleanBoolean(value) {
-  return typeof value === "boolean" ? value : null;
-}
-
-function cleanMetadata(input) {
+function cleanMetadata(input = {}) {
+  const battery = input.batteryPercent;
   return {
     manufacturer: cleanText(input.manufacturer, 50),
     model: cleanText(input.model, 80),
     androidVersion: cleanText(input.androidVersion, 30),
     securityPatch: cleanText(input.securityPatch, 20),
-    batteryPercent: cleanBattery(input.batteryPercent),
-    charging: cleanBoolean(input.charging),
+    batteryPercent: typeof battery === "number" && Number.isFinite(battery)
+      ? Math.max(0, Math.min(100, Math.round(battery)))
+      : null,
+    charging: typeof input.charging === "boolean" ? input.charging : null,
     appVersion: cleanText(input.appVersion, 30),
   };
 }
 
-async function loadDevices() {
-  await mkdir(DATA_DIR, { recursive: true });
+async function loadJson(file, fallback) {
   try {
-    const parsed = JSON.parse(await readFile(DATA_FILE, "utf8"));
-    return Array.isArray(parsed.devices) ? parsed.devices : [];
+    return JSON.parse(await readFile(file, "utf8"));
   } catch (error) {
-    if (error.code !== "ENOENT") throw error;
-    return [];
+    if (error.code === "ENOENT") return fallback;
+    throw error;
   }
 }
 
-let devices = await loadDevices();
+async function saveJson(file, value) {
+  await mkdir(DATA_DIR, { recursive: true });
+  const temporary = file + ".tmp";
+  await writeFile(temporary, JSON.stringify(value, null, 2), { mode: 0o600 });
+  await rename(temporary, file);
+}
 
-async function persistDevices() {
-  const temporary = `${DATA_FILE}.tmp`;
-  await writeFile(temporary, JSON.stringify({ devices }, null, 2), { mode: 0o600 });
-  await rename(temporary, DATA_FILE);
+let devices = await loadJson(DATA_FILE, []);
+let adminAuth = await loadJson(AUTH_FILE, null);
+
+function rateLimited(key, limit, windowMs) {
+  const now = Date.now();
+  const state = rateLimits.get(key) ?? { count: 0, resetAt: now + windowMs };
+  if (state.resetAt <= now) {
+    state.count = 0;
+    state.resetAt = now + windowMs;
+  }
+  state.count += 1;
+  rateLimits.set(key, state);
+  return state.count > limit;
+}
+
+function isLoopback(request) {
+  const address = request.socket.remoteAddress ?? "";
+  const hostHeader = (request.headers.host ?? "").split(":")[0].replace(/^\\[|\\]$/g, "");
+  return (address === "127.0.0.1" || address === "::1" || address === "::ffff:127.0.0.1")
+    && (hostHeader === "localhost" || hostHeader === "127.0.0.1" || hostHeader === "::1");
+}
+
+function sessionFor(request) {
+  const token = bearerToken(request);
+  if (!token) return null;
+  const digest = sha256(token);
+  const expiresAt = sessions.get(digest);
+  if (!expiresAt || expiresAt <= Date.now()) {
+    sessions.delete(digest);
+    return null;
+  }
+  return digest;
 }
 
 function requireOperator(request, response) {
-  const supplied = bearerToken(request);
-  if (!supplied || !safeEqual(supplied, ADMIN_TOKEN)) {
-    sendJson(response, 401, { error: "Operator authentication required." });
+  if (!sessionFor(request)) {
+    sendJson(response, 401, { error: "Sign in to SkySpy Control first." });
     return false;
   }
   return true;
 }
 
 function publicDevice(device) {
-  const { tokenHash, ...safe } = device;
+  const { tokenHash, installIdHash, ...safe } = device;
   return {
     ...safe,
     status: Date.now() - Date.parse(device.lastSeenAt) <= ONLINE_WINDOW_MS ? "online" : "offline",
   };
 }
 
-function getDeviceByToken(token) {
+function deviceForToken(token) {
   if (!token) return null;
   const digest = sha256(token);
   return devices.find((device) => safeEqual(device.tokenHash, digest)) ?? null;
 }
 
-function clientAddress(request) {
-  return request.socket.remoteAddress ?? "unknown";
+function validInstallId(value) {
+  return typeof value === "string"
+    && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
-function isRateLimited(address) {
-  const now = Date.now();
-  const bucket = claimAttempts.get(address) ?? { count: 0, resetAt: now + 60_000 };
-  if (now > bucket.resetAt) {
-    bucket.count = 0;
-    bucket.resetAt = now + 60_000;
-  }
-  bucket.count += 1;
-  claimAttempts.set(address, bucket);
-  return bucket.count > 12;
-}
-
-function pruneEphemeralState() {
-  const now = Date.now();
-  for (const [code, session] of pairingCodes) {
-    if (session.expiresAt <= now || session.used) pairingCodes.delete(code);
-  }
-  for (const [address, bucket] of claimAttempts) {
-    if (bucket.resetAt <= now) claimAttempts.delete(address);
-  }
-}
-
-function makePairingCode() {
-  pruneEphemeralState();
-  let code;
-  do {
-    code = String(randomInt(0, 1_000_000)).padStart(6, "0");
-  } while (pairingCodes.has(code));
-  return code;
-}
-
-async function route(request, response) {
+async function handle(request, response) {
   if (!setCors(request, response)) return;
   if (request.method === "OPTIONS") {
     response.writeHead(204);
@@ -205,78 +212,136 @@ async function route(request, response) {
   }
 
   const url = new URL(request.url ?? "/", "http://localhost");
-  const pathname = url.pathname;
+  const route = url.pathname;
+  const address = request.socket.remoteAddress ?? "unknown";
 
-  if (request.method === "GET" && pathname === "/health") {
-    sendJson(response, 200, { ok: true, service: "skyspy-api", version: "0.1.0" });
+  if (request.method === "GET" && route === "/health") {
+    sendJson(response, 200, { ok: true, service: "skyspy-api", version: "0.2.0" });
     return;
   }
 
-  if (request.method === "POST" && pathname === "/api/pairing") {
-    if (!requireOperator(request, response)) return;
-    const code = makePairingCode();
-    const expiresAt = Date.now() + PAIRING_TTL_MS;
-    pairingCodes.set(code, { expiresAt, used: false });
-    sendJson(response, 201, {
-      code,
-      expiresAt: new Date(expiresAt).toISOString(),
-      expiresInSeconds: Math.floor(PAIRING_TTL_MS / 1000),
-    });
+  if (request.method === "GET" && route === "/api/auth/status") {
+    sendJson(response, 200, { configured: Boolean(adminAuth) });
     return;
   }
 
-  if (request.method === "POST" && pathname === "/api/pairing/claim") {
-    const address = clientAddress(request);
-    if (isRateLimited(address)) {
-      sendJson(response, 429, { error: "Too many pairing attempts. Try again later." });
+  if (request.method === "POST" && route === "/api/auth/setup") {
+    if (!isLoopback(request)) {
+      sendJson(response, 403, { error: "Create the first admin account from the server computer." });
+      return;
+    }
+    if (adminAuth) {
+      sendJson(response, 409, { error: "Admin account already exists. Sign in instead." });
       return;
     }
     const body = await readBody(request);
-    const code = typeof body.code === "string" ? body.code.trim() : "";
-    const session = pairingCodes.get(code);
-    if (!/^\d{6}$/.test(code) || !session || session.used || session.expiresAt <= Date.now()) {
-      sendJson(response, 400, { error: "Pairing code is invalid or expired." });
+    const password = typeof body.password === "string" ? body.password : "";
+    if (password.length < 12 || password.length > 128) {
+      sendJson(response, 400, { error: "Admin password must be between 12 and 128 characters." });
       return;
     }
+    const salt = randomBytes(16).toString("hex");
+    const passwordHash = scryptSync(password, salt, 64).toString("hex");
+    adminAuth = { salt, passwordHash, createdAt: new Date().toISOString() };
+    await saveJson(AUTH_FILE, adminAuth);
+    const token = randomBytes(32).toString("base64url");
+    sessions.set(sha256(token), Date.now() + SESSION_TTL_MS);
+    sendJson(response, 201, { token, expiresInSeconds: SESSION_TTL_MS / 1000 });
+    return;
+  }
 
-    const metadata = cleanMetadata(body.device ?? {});
+  if (request.method === "POST" && route === "/api/auth/login") {
+    if (!adminAuth) {
+      sendJson(response, 409, { error: "Create the admin account on the server computer first." });
+      return;
+    }
+    if (rateLimited("login:" + address, 8, 60_000)) {
+      sendJson(response, 429, { error: "Too many login attempts. Try again in one minute." });
+      return;
+    }
+    const body = await readBody(request);
+    const password = typeof body.password === "string" ? body.password : "";
+    const candidate = scryptSync(password, adminAuth.salt, 64).toString("hex");
+    if (!safeEqual(candidate, adminAuth.passwordHash)) {
+      sendJson(response, 401, { error: "Incorrect admin password." });
+      return;
+    }
+    const token = randomBytes(32).toString("base64url");
+    sessions.set(sha256(token), Date.now() + SESSION_TTL_MS);
+    sendJson(response, 200, { token, expiresInSeconds: SESSION_TTL_MS / 1000 });
+    return;
+  }
+
+  if (request.method === "POST" && route === "/api/auth/logout") {
+    const digest = sessionFor(request);
+    if (digest) sessions.delete(digest);
+    sendJson(response, 200, { ok: true });
+    return;
+  }
+
+  if (request.method === "POST" && route === "/api/device/register") {
+    if (rateLimited("register:" + address, 12, 60_000)) {
+      sendJson(response, 429, { error: "Too many registration attempts from this network." });
+      return;
+    }
+    const body = await readBody(request);
+    if (body.consent !== true) {
+      sendJson(response, 403, { error: "The device owner must approve sharing the listed diagnostics." });
+      return;
+    }
+    if (!validInstallId(body.installId)) {
+      sendJson(response, 400, { error: "Companion installation identity is invalid." });
+      return;
+    }
+    const metadata = cleanMetadata(body.device);
     if (!metadata.model) {
       sendJson(response, 400, { error: "Device model is required." });
       return;
     }
 
-    session.used = true;
+    const installIdHash = sha256(body.installId);
+    let device = devices.find((item) => safeEqual(item.installIdHash, installIdHash));
     const deviceToken = randomBytes(32).toString("base64url");
-    const device = {
-      id: randomUUID(),
-      name: cleanText(body.deviceName, 60) || metadata.model,
-      ...metadata,
-      tokenHash: sha256(deviceToken),
-      createdAt: new Date().toISOString(),
-      lastSeenAt: new Date().toISOString(),
-    };
-    devices.push(device);
-    await persistDevices();
+    const now = new Date().toISOString();
 
+    if (device) {
+      device = Object.assign(device, metadata, {
+        tokenHash: sha256(deviceToken),
+        lastSeenAt: now,
+        name: cleanText(body.deviceName, 60) || metadata.model,
+      });
+    } else {
+      device = {
+        id: randomUUID(),
+        installIdHash,
+        name: cleanText(body.deviceName, 60) || metadata.model,
+        ...metadata,
+        tokenHash: sha256(deviceToken),
+        createdAt: now,
+        lastSeenAt: now,
+      };
+      devices.push(device);
+    }
+    await saveJson(DATA_FILE, devices);
     sendJson(response, 201, {
       deviceId: device.id,
       deviceToken,
-      pairedAt: device.createdAt,
-      message: "Device paired. Keep the Companion installed and open to send status heartbeats.",
+      registeredAt: device.createdAt,
+      message: "Device registered after owner approval.",
     });
     return;
   }
 
-  if (request.method === "GET" && pathname === "/api/devices") {
+  if (request.method === "GET" && route === "/api/devices") {
     if (!requireOperator(request, response)) return;
     sendJson(response, 200, { devices: devices.map(publicDevice) });
     return;
   }
 
-  const detailMatch = /^\/api\/devices\/([0-9a-f-]{36})$/.exec(pathname);
-  if (request.method === "GET" && detailMatch) {
+  const detail = /^\\/api\\/devices\\/([0-9a-f-]{36})$/.exec(route);
+  if (request.method === "GET" && detail) {
     if (!requireOperator(request, response)) return;
-    const device = devices.find((item) => item.id === detailMatch[1]);
+    const device = devices.find((item) => item.id === detail[1]);
     if (!device) {
       sendJson(response, 404, { error: "Device not found." });
       return;
@@ -285,32 +350,32 @@ async function route(request, response) {
     return;
   }
 
-  if (request.method === "POST" && pathname === "/api/device/unpair") {
-    const device = getDeviceByToken(bearerToken(request));
+  if (request.method === "POST" && route === "/api/device/heartbeat") {
+    const device = deviceForToken(bearerToken(request));
     if (!device) {
-      sendJson(response, 401, { error: "Device authentication failed. Pair this Companion again." });
-      return;
-    }
-    devices = devices.filter((item) => item.id !== device.id);
-    await persistDevices();
-    sendJson(response, 200, { ok: true, message: "Device unpaired and removed from inventory." });
-    return;
-  }
-
-  if (request.method === "POST" && pathname === "/api/device/heartbeat") {
-    const device = getDeviceByToken(bearerToken(request));
-    if (!device) {
-      sendJson(response, 401, { error: "Device authentication failed. Pair this Companion again." });
+      sendJson(response, 401, { error: "Device session is invalid. Connect this Companion again." });
       return;
     }
     const body = await readBody(request);
-    const metadata = cleanMetadata(body.device ?? {});
+    const metadata = cleanMetadata(body.device);
     device.lastSeenAt = new Date().toISOString();
     for (const [key, value] of Object.entries(metadata)) {
       if (value !== "" && value !== null) device[key] = value;
     }
-    await persistDevices();
+    await saveJson(DATA_FILE, devices);
     sendJson(response, 200, { ok: true, deviceId: device.id, lastSeenAt: device.lastSeenAt });
+    return;
+  }
+
+  if (request.method === "POST" && route === "/api/device/unpair") {
+    const device = deviceForToken(bearerToken(request));
+    if (!device) {
+      sendJson(response, 401, { error: "Device session is invalid." });
+      return;
+    }
+    devices = devices.filter((item) => item.id !== device.id);
+    await saveJson(DATA_FILE, devices);
+    sendJson(response, 200, { ok: true, message: "Device removed from Control inventory." });
     return;
   }
 
@@ -318,11 +383,9 @@ async function route(request, response) {
 }
 
 const server = http.createServer((request, response) => {
-  route(request, response).catch((error) => {
+  handle(request, response).catch((error) => {
     const status = Number.isInteger(error.statusCode) ? error.statusCode : 500;
-    if (status === 500) {
-      console.error("Request failed:", error.message);
-    }
+    if (status === 500) console.error("Request failed:", error.message);
     if (!response.headersSent) {
       sendJson(response, status, { error: status === 500 ? "Internal server error." : error.message });
     } else {
@@ -332,5 +395,6 @@ const server = http.createServer((request, response) => {
 });
 
 server.listen(PORT, "0.0.0.0", () => {
-  console.log(`SkySpy API listening on 0.0.0.0:${PORT}`);
+  console.log("SkySpy API listening on port " + PORT);
+  console.log("Data directory: " + DATA_DIR);
 });
