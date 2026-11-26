@@ -12,6 +12,17 @@ const PORT = Number(option("--port", "8787"));
 const DATA_DIR = path.resolve(option("--data-dir", "./data"));
 const DATA_FILE = path.join(DATA_DIR, "devices.json");
 const AUTH_FILE = path.join(DATA_DIR, "admin-auth.json");
+const PUBLIC_DIR = path.resolve(process.cwd(), "public");
+const CONTENT_TYPES = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".webmanifest": "application/manifest+json",
+  ".json": "application/json; charset=utf-8",
+  ".png": "image/png",
+  ".ico": "image/x-icon"
+};
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 const ONLINE_WINDOW_MS = 90 * 1000;
 const MAX_BODY_BYTES = 16 * 1024;
@@ -203,6 +214,44 @@ function validInstallId(value) {
     && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
+
+async function serveControlApp(route, response) {
+  if (route.startsWith("/api/") || route === "/health") return false;
+  let requestedPath;
+  try {
+    requestedPath = decodeURIComponent(route.split("?")[0] || "/");
+  } catch {
+    return false;
+  }
+  const relative = requestedPath === "/" ? "index.html" : requestedPath.replace(/^\\/+/, "");
+  const filePath = path.resolve(PUBLIC_DIR, relative);
+  if (filePath !== PUBLIC_DIR && !filePath.startsWith(PUBLIC_DIR + path.sep)) return false;
+
+  let bytes;
+  let resolvedPath = filePath;
+  try {
+    bytes = await readFile(resolvedPath);
+  } catch (error) {
+    if (error.code !== "ENOENT" || path.extname(requestedPath)) return false;
+    resolvedPath = path.join(PUBLIC_DIR, "index.html");
+    try {
+      bytes = await readFile(resolvedPath);
+    } catch {
+      return false;
+    }
+  }
+
+  const extension = path.extname(resolvedPath).toLowerCase();
+  response.writeHead(200, {
+    "Content-Type": CONTENT_TYPES[extension] ?? "application/octet-stream",
+    "Content-Length": bytes.length,
+    "Cache-Control": extension === ".html" ? "no-cache" : "public, max-age=31536000, immutable",
+    "X-Content-Type-Options": "nosniff"
+  });
+  response.end(bytes);
+  return true;
+}
+
 async function handle(request, response) {
   if (!setCors(request, response)) return;
   if (request.method === "OPTIONS") {
@@ -379,6 +428,7 @@ async function handle(request, response) {
     return;
   }
 
+  if (request.method === "GET" && await serveControlApp(route, response)) return;
   sendJson(response, 404, { error: "Route not found." });
 }
 
