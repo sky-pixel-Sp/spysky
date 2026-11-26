@@ -109,3 +109,11 @@ h3 { font:700 15px Manrope,sans-serif; margin-bottom:7px; }
 .page-footer { display:flex; justify-content:space-between; gap:12px; color:#58677b; font-size:9px; margin-top:35px; padding-top:16px; border-top:1px solid #202a36; }
 @media (max-width: 920px) { .app-shell { grid-template-columns: 190px minmax(0,1fr); } .content-grid { grid-template-columns:1fr; } .details-column { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); } }
 @media (max-width: 640px) { .app-shell { grid-template-columns:1fr; } .sidebar { min-height:auto; padding:14px 15px; border-right:0; border-bottom:1px solid #232c38; } .brand { padding:0; } .sidebar-section-label,.nav-item,.sidebar-bottom { display:none; } .main-content { padding:24px 15px; } .topbar { align-items:flex-start; flex-direction:column; } .topbar-actions { width:100%; justify-content:space-between; } .stats-grid { gap:8px; } .stat-card { padding:12px; min-height:95px; } .stat-card strong { font-size:23px; } .stat-card small { font-size:9px; } .details-column { display:flex; } .page-footer { flex-direction:column; } .device-row { gap:8px; } .status-badge { padding:5px 6px; } }
+
+
+.enrollment-panel { background:linear-gradient(145deg,#1a2a43,#151c27); border-color:#395a91; }
+.enrollment-panel p { color:#899bb5; font-size:11px; line-height:1.6; margin:10px 0 0; }
+.server-address { margin-top:16px; border-top:1px solid #30435f; padding-top:12px; display:grid; gap:7px; }
+.server-address span { color:#8fa6c8; font-size:9px; font-weight:700; letter-spacing:1px; }
+.server-address code { color:#d4e3ff; font-size:10px; overflow-wrap:anywhere; }
+.session-actions { display:flex; justify-content:flex-end; align-items:center; gap:13px; margin-top:18px; color:#73839a; font-size:10px; }
