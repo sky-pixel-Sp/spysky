@@ -1,0 +1,13 @@
+node_modules/
+dist/
+build/
+.gradle/
+.idea/
+local.properties
+*.iml
+.DS_Store
+.env
+.env.*
+!*.env.example
+services/api/data/
+*.apk
