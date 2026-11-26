@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- The app validates HTTP destinations in code and permits it only for
+         localhost/private IPv4 LAN addresses. Public endpoints must use HTTPS. -->
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>
