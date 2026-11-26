@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,12 +9,16 @@ import { randomUUID, randomInt } from "node:crypto";
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
 const serverFile = path.resolve(currentDir, "../src/server.mjs");
 const dataDir = await mkdtemp(path.join(tmpdir(), "skyspy-api-test-"));
+const publicDir = path.join(dataDir, "public");
+await mkdir(publicDir, { recursive: true });
+await writeFile(path.join(publicDir, "index.html"), "<!doctype html><title>SkySpy Test Control</title>");
 const port = 18000 + randomInt(10000);
 const baseUrl = "http://127.0.0.1:" + port;
 const child = spawn(process.execPath, [
   serverFile,
   "--port", String(port),
-  "--data-dir", dataDir
+  "--data-dir", dataDir,
+  "--public-dir", publicDir
 ], { stdio: "ignore" });
 
 async function waitForServer() {
@@ -48,6 +52,10 @@ try {
   const health = await request("/health");
   assert.equal(health.status, 200);
   assert.equal(health.body.ok, true);
+
+  const controlPageResponse = await fetch(baseUrl + "/");
+  assert.equal(controlPageResponse.status, 200);
+  assert.match(await controlPageResponse.text(), /SkySpy Test Control/);
 
   const initialStatus = await request("/api/auth/status");
   assert.equal(initialStatus.status, 200);
