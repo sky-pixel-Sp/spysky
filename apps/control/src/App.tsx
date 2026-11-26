@@ -18,7 +18,7 @@ type Device = {
 type AuthStatus = "loading" | "setup" | "login" | "authenticated";
 type ApiError = { error?: string };
 
-const DEFAULT_API = "http://localhost:8787";
+const DEFAULT_API = window.location.origin;
 
 function formatDate(value: string) {
   if (!value) return "Not reported";
